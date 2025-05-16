@@ -115,7 +115,7 @@ export default function HomePage() {
       return new Date(isoDateString).toLocaleDateString('ja-JP', {
         year: 'numeric', month: 'long', day: 'numeric'
       });
-    } catch (_e: unknown) { // ★★★ 修正 ★★★
+    } catch (unknown) { // ★★★ 修正 ★★★
       return 'Invalid Date';
     }
   };

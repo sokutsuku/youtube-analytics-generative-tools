@@ -16,7 +16,7 @@ async function extractChannelIdentifier(url: string): Promise<{ id?: string; for
 
     if (pathParts.length > 0) {
       if (pathParts[0] === 'channel' && pathParts[1]) {
-        if (pathParts[1].startsWith('UC') && pathParts[1].length === 24) { // 標準的なチャンネルID形式
+        if (pathParts[1].startsWith('UC') && pathParts[1].length === 24) {
             return { id: pathParts[1] };
         }
       }
@@ -26,48 +26,52 @@ async function extractChannelIdentifier(url: string): Promise<{ id?: string; for
       if (pathParts[0].startsWith('@') && pathParts[0].length > 1) {
         const handle = pathParts[0];
         try {
-          const searchResponse = await youtube.search.list({ // ユーザー様が修正された正しい呼び出し方
+          const searchResponse = await youtube.search.list({
             part: ['snippet'],
             q: handle,
-            type: ['channel'],
+            type: ['channel'], // ★★★ 修正: 文字列から文字列の配列へ ★★★
             maxResults: 1,
           });
-          if (searchResponse.data.items && searchResponse.data.items.length > 0 && searchResponse.data.items[0].id?.channelId) {
+          // searchResponse.data が存在するか確認
+          if (searchResponse && searchResponse.data && searchResponse.data.items && searchResponse.data.items.length > 0 && searchResponse.data.items[0].id?.channelId) {
             return { id: searchResponse.data.items[0].id.channelId };
           } else {
             return { error: `Handle "${handle}" not found or not a channel.` };
           }
-        } catch (searchError: unknown) { // Error 1: any を unknown に変更
-          console.error('Error searching for handle:', searchError);
-          // searchErrorがErrorインスタンスか、messageプロパティを持つかなどをチェック
+        } catch (searchError: unknown) { // catchのエラー型をunknownに
+          console.error(`Error searching for handle "${handle}":`, searchError);
           if (searchError instanceof Error) {
             return { error: `Error resolving handle "${handle}": ${searchError.message}` };
           }
-          return { error: `Error resolving handle "${handle}": An unknown error occurred` };
+          return { error: `Error resolving handle "${handle}": An unknown error occurred.` };
         }
       }
       const lastPart = pathParts[pathParts.length - 1];
       if (lastPart.startsWith('@')) {
         const handle = lastPart;
          try {
-          const searchResponse = await youtube.search.list({ // ユーザー様が修正された正しい呼び出し方
+          const searchResponse = await youtube.search.list({
             part: ['snippet'],
             q: handle,
-            type: ['channel'],
+            type: ['channel'], // ★★★ 修正: 文字列から文字列の配列へ ★★★
             maxResults: 1,
           });
-          if (searchResponse.data.items && searchResponse.data.items.length > 0 && searchResponse.data.items[0].id?.channelId) {
+          // searchResponse.data が存在するか確認
+          if (searchResponse && searchResponse.data && searchResponse.data.items && searchResponse.data.items.length > 0 && searchResponse.data.items[0].id?.channelId) {
             return { id: searchResponse.data.items[0].id.channelId };
           }
-        } catch (_searchError: unknown) { /* Error 2: searchError を _searchError に、型を unknown に (意図的に使用しない場合) */ }
+          // ここではエラーを返さず、次のforUsernameのフォールバックがあるため、そのまま進む
+        } catch (searchError: unknown) { // catchのエラー型をunknownに
+            console.error(`Error searching for handle (last part) "${handle}":`, searchError);
+            // エラーがあっても次のforUsernameの処理に進むため、ここではエラーオブジェクトを返さない
+        }
       }
-      // 最後のパス部分をユーザー名として試す
       if (pathParts.length > 0) {
           return { forUsername: pathParts[pathParts.length -1] };
       }
     }
     return { error: 'Could not determine channel identifier from URL.' };
-  } catch (e: unknown) { // catchの型を unknown に変更
+  } catch (e: unknown) {
     console.error('Invalid Channel URL:', e);
     if (e instanceof Error) {
         return { error: `Invalid Channel URL format: ${e.message}` };
@@ -174,19 +178,22 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) { // Error 4: any を unknown に変更
     console.error('Error in POST /api/getChannelInfo:', error);
     let errorMessage = 'Failed to fetch channel info.';
-    let errorDetails: any = error instanceof Error ? error.message : String(error); // エラー詳細の初期化
+    let errorDetails: unknown = error instanceof Error ? error.message : String(error);
 
     if (error instanceof Error) {
-      // gaxios (googleapisの内部で使用) のエラー形式を考慮してみる
-      const gaxiosError = error as any; // 一時的にanyとしてアクセス
-      if (gaxiosError.response?.data?.error?.message) {
-        errorMessage = `Google API Error: ${gaxiosError.response.data.error.message}`;
-        errorDetails = gaxiosError.response.data;
+      const gaxiosError = error as unknown;
+      if (
+        typeof gaxiosError === 'object' &&
+        gaxiosError !== null &&
+        'response' in gaxiosError &&
+        typeof (gaxiosError as any).response?.data?.error?.message === 'string'
+      ) {
+        errorMessage = `Google API Error: ${(gaxiosError as any).response.data.error.message}`;
+        errorDetails = (gaxiosError as any).response.data;
       } else {
         errorMessage = error.message;
       }
     } else {
-      // Errorインスタンスでない場合
       errorMessage = 'An unknown error occurred while fetching channel info.';
     }
 
