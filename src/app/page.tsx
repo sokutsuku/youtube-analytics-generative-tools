@@ -50,7 +50,7 @@ export default function HomePage() {
   const [channelFetchError, setChannelFetchError] = useState<string>('');
 
 
-  // --- 動画情報取得処理 (catch を修正) ---
+  // --- 動画情報取得処理 (catch を修正済み) ---
   const handleVideoSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsFetchingVideo(true);
@@ -68,7 +68,7 @@ export default function HomePage() {
         throw new Error(result.error || `An error occurred: ${response.statusText}`);
       }
       setVideoInfo(result.data || null);
-    } catch (err: unknown) { // ★★★ 修正 ★★★
+    } catch (err: unknown) {
       if (err instanceof Error) {
         setVideoFetchError(err.message || 'Failed to fetch video info.');
       } else {
@@ -79,7 +79,7 @@ export default function HomePage() {
     }
   };
 
-  // --- チャンネル情報取得処理 (catch を修正) ---
+  // --- チャンネル情報取得処理 (catch を修正済み) ---
   const handleChannelSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsFetchingChannel(true);
@@ -97,7 +97,7 @@ export default function HomePage() {
         throw new Error(result.error || `An error occurred: ${response.statusText}`);
       }
       setChannelInfo(result.data || null);
-    } catch (err: unknown) { // ★★★ 修正 ★★★
+    } catch (err: unknown) {
       if (err instanceof Error) {
         setChannelFetchError(err.message || 'Failed to fetch channel info.');
       } else {
@@ -115,7 +115,7 @@ export default function HomePage() {
       return new Date(isoDateString).toLocaleDateString('ja-JP', {
         year: 'numeric', month: 'long', day: 'numeric'
       });
-    } catch (unknown) { // ★★★ 修正 ★★★
+    } catch (_) { // ★★★ 修正: 変数名を _ (アンダースコアのみ) に ★★★
       return 'Invalid Date';
     }
   };

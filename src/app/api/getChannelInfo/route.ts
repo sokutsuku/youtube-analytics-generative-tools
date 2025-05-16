@@ -111,6 +111,7 @@ interface ExtractedChannelInfo {
 
 export async function POST(request: NextRequest) {
   try {
+    // ... (tryブロックの前半は変更なし) ...
     const body = await request.json();
     const { channelUrl } = body;
 
@@ -130,15 +131,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Error 3: params を const で宣言し、初期化時に条件を反映
     const params: youtube_v3.Params$Resource$Channels$List = {
         part: ['snippet', 'statistics'],
-        // スプレッド構文を使って条件に応じてプロパティを追加
         ...(identifier.id && { id: [identifier.id] }),
         ...(identifier.forUsername && { forUsername: identifier.forUsername }),
     };
 
-    // identifier.id も identifier.forUsername もない場合はエラー
     if (!params.id && !params.forUsername) {
         return NextResponse.json(
             { message: 'Could not determine channel ID or username from URL for API params.', error: 'Identifier not resolved for params' },
@@ -175,26 +173,52 @@ export async function POST(request: NextRequest) {
       data: extractedInfo,
     });
 
-  } catch (error: unknown) { // Error 4: any を unknown に変更
+  } catch (error: unknown) {
     console.error('Error in POST /api/getChannelInfo:', error);
     let errorMessage = 'Failed to fetch channel info.';
-    let errorDetails: unknown = error instanceof Error ? error.message : String(error);
+    let errorDetails: unknown = 'Unknown error details'; // 初期値を設定
 
     if (error instanceof Error) {
-      const gaxiosError = error as unknown;
+      errorMessage = error.message; // まずは基本的なエラーメッセージを設定
+      errorDetails = error.stack || error.message; // スタックトレースかメッセージを詳細として設定
+
+      // GaxiosErrorのような構造を持つかチェック (より安全に)
+      // `error` オブジェクトが `response` プロパティを持ち、
+      // その `response` が `data` プロパティを持ち、
+      // さらにその `data` が `error` プロパティを持ち、
+      // その `error` が `message` プロパティを持つか、を段階的に確認
       if (
-        typeof gaxiosError === 'object' &&
-        gaxiosError !== null &&
-        'response' in gaxiosError &&
-        typeof (gaxiosError as any).response?.data?.error?.message === 'string'
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        error.response !== null &&
+        typeof error.response === 'object' &&
+        'data' in error.response &&
+        error.response.data !== null &&
+        typeof error.response.data === 'object' &&
+        'error' in error.response.data &&
+        error.response.data.error !== null &&
+        typeof error.response.data.error === 'object' &&
+        'message' in error.response.data.error &&
+        typeof error.response.data.error.message === 'string'
       ) {
-        errorMessage = `Google API Error: ${(gaxiosError as any).response.data.error.message}`;
-        errorDetails = (gaxiosError as any).response.data;
-      } else {
-        errorMessage = error.message;
+        // 型アサーションの前に十分なチェックを行う
+        const gaxiosSpecificError = error.response.data.error;
+        errorMessage = `Google API Error: ${gaxiosSpecificError.message}`;
+        errorDetails = error.response.data; // response.data全体を詳細として保持
       }
     } else {
-      errorMessage = 'An unknown error occurred while fetching channel info.';
+      // Errorインスタンスではない場合
+      errorMessage = 'An unknown error occurred (not an Error instance).';
+      if (typeof error === 'string') {
+        errorDetails = error;
+      } else {
+        try {
+          errorDetails = JSON.stringify(error);
+        } catch {
+          // stringifyできない場合はそのまま
+        }
+      }
     }
 
     return NextResponse.json(

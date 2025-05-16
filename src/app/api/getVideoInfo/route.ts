@@ -1,6 +1,6 @@
 // src/app/api/getVideoInfo/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { google, youtube_v3 } from 'googleapis';
+import { google, youtube_v3 } from 'googleapis'; // youtube_v3 をインポート (paramsの型で使用)
 
 const youtube = google.youtube({
   version: 'v3',
@@ -114,26 +114,49 @@ export async function POST(request: NextRequest) {
       data: extractedInfo,
     });
 
-  } catch (error: unknown) {
+  } catch (error: unknown) { // catchの型を unknown に
     console.error('Error in POST /api/getVideoInfo:', error);
     let errorMessage = 'Failed to fetch video info.';
-    let errorDetails: unknown = error instanceof Error ? error.message : String(error);
+    let errorDetails: unknown = 'Unknown error details'; // 初期値を設定
 
     if (error instanceof Error) {
-      const gaxiosError = error as unknown;
+      errorMessage = error.message; // まずは基本的なエラーメッセージを設定
+      errorDetails = error.stack || error.message; // スタックトレースかメッセージを詳細として設定
+
+      // GaxiosErrorのような構造を持つかチェック (より安全に)
       if (
-        typeof gaxiosError === 'object' &&
-        gaxiosError !== null &&
-        'response' in gaxiosError &&
-        typeof (gaxiosError as any).response?.data?.error?.message === 'string'
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error && // error オブジェクトに response プロパティがあるか
+        error.response !== null &&
+        typeof error.response === 'object' &&
+        'data' in error.response && // error.response に data プロパティがあるか
+        error.response.data !== null &&
+        typeof error.response.data === 'object' &&
+        'error' in error.response.data && // error.response.data に error プロパティがあるか
+        error.response.data.error !== null &&
+        typeof error.response.data.error === 'object' &&
+        'message' in error.response.data.error && // error.response.data.error に message プロパティがあるか
+        typeof error.response.data.error.message === 'string'
       ) {
-        errorMessage = `Google API Error: ${(gaxiosError as any).response.data.error.message}`;
-        errorDetails = (gaxiosError as any).response.data;
-      } else {
-        errorMessage = error.message;
+        // 型アサーションの前に十分なチェックを行う
+        // ここでは error.response.data.error がオブジェクトで message プロパティを持つことが保証されている
+        const gaxiosSpecificErrorMessage = (error.response.data.error as { message: string }).message;
+        errorMessage = `Google API Error: ${gaxiosSpecificErrorMessage}`;
+        errorDetails = error.response.data; // response.data全体を詳細として保持
       }
     } else {
-      errorMessage = 'An unknown error occurred while fetching video info.';
+      // Errorインスタンスではない場合
+      errorMessage = 'An unknown error occurred (not an Error instance).';
+      if (typeof error === 'string') {
+        errorDetails = error;
+      } else {
+        try {
+          errorDetails = JSON.stringify(error); // 念のため stringify も試みる
+        } catch {
+          // stringify できない場合はそのまま
+        }
+      }
     }
 
     return NextResponse.json(
