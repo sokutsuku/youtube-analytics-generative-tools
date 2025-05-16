@@ -17,7 +17,7 @@ interface VideoApiResponse {
   error?: string;
 }
 
-// --- チャンネル情報関連の型定義 (新規) ---
+// --- チャンネル情報関連の型定義 (totalViewCount を追加) ---
 interface ChannelInfo {
   channelId: string;
   title?: string | null;
@@ -26,6 +26,7 @@ interface ChannelInfo {
   subscriberCount?: string | null;
   videoCount?: string | null;
   thumbnailUrl?: string | null;
+  totalViewCount?: string | null;
 }
 
 interface ChannelApiResponse {
@@ -42,14 +43,14 @@ export default function HomePage() {
   const [isFetchingVideo, setIsFetchingVideo] = useState<boolean>(false);
   const [videoFetchError, setVideoFetchError] = useState<string>('');
 
-  // --- チャンネル情報関連のState (新規) ---
+  // --- チャンネル情報関連のState (既存) ---
   const [youtubeChannelUrl, setYoutubeChannelUrl] = useState<string>('');
   const [channelInfo, setChannelInfo] = useState<ChannelInfo | null>(null);
   const [isFetchingChannel, setIsFetchingChannel] = useState<boolean>(false);
   const [channelFetchError, setChannelFetchError] = useState<string>('');
 
 
-  // --- 動画情報取得処理 (既存) ---
+  // --- 動画情報取得処理 (catch を修正) ---
   const handleVideoSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsFetchingVideo(true);
@@ -67,14 +68,18 @@ export default function HomePage() {
         throw new Error(result.error || `An error occurred: ${response.statusText}`);
       }
       setVideoInfo(result.data || null);
-    } catch (err: any) {
-      setVideoFetchError(err.message || 'Failed to fetch video info.');
+    } catch (err: unknown) { // ★★★ 修正 ★★★
+      if (err instanceof Error) {
+        setVideoFetchError(err.message || 'Failed to fetch video info.');
+      } else {
+        setVideoFetchError('An unknown error occurred while fetching video info.');
+      }
     } finally {
       setIsFetchingVideo(false);
     }
   };
 
-  // --- チャンネル情報取得処理 (新規) ---
+  // --- チャンネル情報取得処理 (catch を修正) ---
   const handleChannelSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsFetchingChannel(true);
@@ -82,7 +87,7 @@ export default function HomePage() {
     setChannelInfo(null);
 
     try {
-      const response = await fetch('/api/getChannelInfo', { // 新しいAPIエンドポイント
+      const response = await fetch('/api/getChannelInfo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channelUrl: youtubeChannelUrl }),
@@ -92,49 +97,52 @@ export default function HomePage() {
         throw new Error(result.error || `An error occurred: ${response.statusText}`);
       }
       setChannelInfo(result.data || null);
-    } catch (err: any) {
-      setChannelFetchError(err.message || 'Failed to fetch channel info.');
+    } catch (err: unknown) { // ★★★ 修正 ★★★
+      if (err instanceof Error) {
+        setChannelFetchError(err.message || 'Failed to fetch channel info.');
+      } else {
+        setChannelFetchError('An unknown error occurred while fetching channel info.');
+      }
     } finally {
       setIsFetchingChannel(false);
     }
   };
 
-  // 日付フォーマット関数 (例)
+  // 日付フォーマット関数 (catch を修正)
   const formatDate = (isoDateString?: string | null) => {
     if (!isoDateString) return 'N/A';
     try {
       return new Date(isoDateString).toLocaleDateString('ja-JP', {
         year: 'numeric', month: 'long', day: 'numeric'
       });
-    } catch (e) {
+    } catch (_e: unknown) { // ★★★ 修正 ★★★
       return 'Invalid Date';
     }
   };
 
-  // 数値フォーマット関数 (例: 10000 -> 1万)
+  // 数値フォーマット関数 (既存のまま)
   const formatCount = (countStr?: string | null) => {
     if (!countStr) return 'N/A';
     const count = parseInt(countStr, 10);
     if (isNaN(count)) return 'N/A';
     if (count >= 100000000) {
-        return (count / 100000000).toFixed(1) + '億';
+        return (count / 100000000).toFixed(1).replace(/\.0$/, '') + '億';
     }
     if (count >= 10000) {
-        return (count / 10000).toFixed(1) + '万';
+        return (count / 10000).toFixed(1).replace(/\.0$/, '') + '万';
     }
     return count.toLocaleString();
   };
 
 
   return (
-    <main className="min-h-screen bg-gray-100 flex flex-col items-center p-4 space-y-12">
-      {/* --- 動画情報取得セクション (既存のUIを流用・調整) --- */}
+    <main className="min-h-screen bg-gray-100 flex flex-col items-center p-4 space-y-12 mb-12">
+      {/* --- 動画情報取得セクション --- */}
       <section className="bg-white shadow-xl rounded-lg p-6 md:p-8 w-full max-w-2xl">
         <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-8 text-center">
           YouTube 動画情報ゲッター
         </h1>
         <form onSubmit={handleVideoSubmit} className="space-y-6">
-          {/* ... (既存の動画URL入力フォーム) ... */}
           <div>
             <label htmlFor="youtubeVideoUrl" className="block text-sm font-medium text-gray-700 mb-1">
               YouTube 動画 URL:
@@ -151,10 +159,9 @@ export default function HomePage() {
             {isFetchingVideo ? '動画情報を取得中...' : '動画情報を取得'}
           </button>
         </form>
-        {videoFetchError && <div role="alert" className="mt-6 bg-red-50 border-l-4 border-red-400 text-red-700 p-4 rounded-md"><p>{videoFetchError}</p></div>}
+        {videoFetchError && <div role="alert" className="mt-6 bg-red-50 border-l-4 border-red-400 text-red-700 p-4 rounded-md"><p className="font-bold">エラー</p><p>{videoFetchError}</p></div>}
         {videoInfo && (
           <div className="mt-8 p-6 border border-gray-200 rounded-lg bg-gray-50 shadow">
-            {/* ... (既存の動画情報表示エリア) ... */}
             <h2 className="text-xl md:text-2xl font-semibold text-gray-800 mb-4 break-words">{videoInfo.title || 'タイトルなし'}</h2>
             {videoInfo.thumbnail_url && <img src={videoInfo.thumbnail_url} alt={videoInfo.title || ''} className="w-full max-w-md mx-auto h-auto rounded-lg mb-4 shadow-lg"/>}
             <p className="text-xs text-gray-600 mb-1 break-all"><strong>動画ID:</strong> {videoInfo.youtube_video_id}</p>
@@ -162,7 +169,7 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* --- チャンネル情報取得セクション (新規) --- */}
+      {/* --- チャンネル情報取得セクション --- */}
       <section className="bg-white shadow-xl rounded-lg p-6 md:p-8 w-full max-w-2xl">
         <h1 className="text-2xl md:text-3xl font-bold text-sky-800 mb-8 text-center">
           YouTube チャンネル情報ゲッター
@@ -206,6 +213,7 @@ export default function HomePage() {
               <p><strong className="font-medium text-gray-700">チャンネル概要:</strong> <span className="text-sm text-gray-600 whitespace-pre-wrap break-words block mt-1 max-h-32 overflow-y-auto border p-2 rounded-md bg-white">{channelInfo.description || 'N/A'}</span></p>
               <p><strong className="font-medium text-gray-700">チャンネル登録者数:</strong> <span className="text-gray-600">{formatCount(channelInfo.subscriberCount)}</span></p>
               <p><strong className="font-medium text-gray-700">総動画数:</strong> <span className="text-gray-600">{formatCount(channelInfo.videoCount)}</span></p>
+              <p><strong className="font-medium text-gray-700">チャンネル総再生回数:</strong> <span className="text-gray-600">{formatCount(channelInfo.totalViewCount)}</span></p>
               <p><strong className="font-medium text-gray-700">チャンネル開設日 (初回投稿日目安):</strong> <span className="text-gray-600">{formatDate(channelInfo.publishedAt)}</span></p>
               <p className="text-xs text-gray-500"><strong className="font-medium">チャンネルID:</strong> <span className="break-all">{channelInfo.channelId}</span></p>
             </div>
