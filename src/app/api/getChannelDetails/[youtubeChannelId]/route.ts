@@ -2,15 +2,38 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-// インターフェース定義は変更なし
-interface ChannelDetailsForClient { /* ... */ }
-interface VideoDetailsForClient { /* ... */ }
+// ★★★ インターフェース定義にプロパティを正しく記述 ★★★
+interface ChannelDetailsForClient {
+  id: string; // Supabaseのchannelsテーブルのid (uuid)
+  youtube_channel_id: string;
+  title?: string | null;
+  description?: string | null;
+  published_at?: string | null;
+  thumbnail_url?: string | null;
+  subscriber_count?: number | null;
+  video_count?: number | null;
+  total_view_count?: number | null;
+}
+
+interface VideoDetailsForClient {
+  id: string; // Supabaseのvideosテーブルのid (uuid)
+  youtube_video_id: string;
+  title?: string | null;
+  thumbnail_url?: string | null;
+  published_at?: string | null;
+  view_count?: number | null; // videosテーブルにキャッシュしている最新統計
+  like_count?: number | null;  // videosテーブルにキャッシュしている最新統計
+  comment_count?: number | null;// videosテーブルにキャッシュしている最新統計
+}
+// ★★★ ここまで ★★★
+
 interface SupabaseErrorDetail {
   message: string;
   details?: string | null;
   hint?: string | null;
   code?: string | null;
 }
+
 interface ApiRouteContext {
   params?: { [key: string]: string | string[] | undefined };
 }
@@ -26,10 +49,19 @@ export async function GET(
   }
 
   try {
-    // ... (tryブロック内のSupabase呼び出しなどは変更なし) ...
     const { data: channelData, error: channelError } = await supabaseAdmin
       .from('channels')
-      .select('id, youtube_channel_id, title, description, published_at, thumbnail_url, subscriber_count, video_count, total_view_count')
+      .select(`
+        id,
+        youtube_channel_id,
+        title,
+        description,
+        published_at,
+        thumbnail_url,
+        subscriber_count,
+        video_count,
+        total_view_count
+      `)
       .eq('youtube_channel_id', youtubeChannelId)
       .single();
 
@@ -43,7 +75,16 @@ export async function GET(
 
     const { data: videosData, error: videosError } = await supabaseAdmin
       .from('videos')
-      .select('id, youtube_video_id, title, thumbnail_url, published_at, view_count, like_count, comment_count')
+      .select(`
+        id,
+        youtube_video_id,
+        title,
+        thumbnail_url,
+        published_at,
+        view_count, 
+        like_count,
+        comment_count 
+      `)
       .eq('channel_id', channelData.id)
       .order('published_at', { ascending: false })
       .limit(50);
@@ -64,21 +105,19 @@ export async function GET(
     return NextResponse.json(responseData);
 
   } catch (error: unknown) {
-    console.error(`Error fetching channel details for ${youtubeChannelId}:`, error);
+    console.error(`Error fetching channel details for youtubeChannelId: ${youtubeChannelId}:`, error);
     let errorMessage = 'Failed to fetch channel details.';
     let errorDetailsOutput: SupabaseErrorDetail | string = 'No further details available.';
 
-    // ★★★ ここの if 条件を修正 ★★★
     if (
         typeof error === 'object' &&
         error !== null &&
-        'message' in error && // 'message'プロパティが存在するか
-        typeof (error as { message?: unknown }).message === 'string' && // messageプロパティの値が文字列か
-        ('code' in error || 'details' in error || 'hint' in error) // Supabase/PostgrestError特有のプロパティがあるか
+        'message' in error &&
+        typeof (error as { message?: unknown }).message === 'string' &&
+        ('code' in error || 'details' in error || 'hint' in error)
     ) {
-      // この時点で error は message (string型) を持つオブジェクトである可能性が高い
-      const potentialSupabaseError = error as SupabaseErrorDetail; // SupabaseErrorDetail型にアサーション
-      errorMessage = potentialSupabaseError.message; // 安全にアクセス
+      const potentialSupabaseError = error as SupabaseErrorDetail;
+      errorMessage = potentialSupabaseError.message;
       errorDetailsOutput = {
           message: potentialSupabaseError.message,
           details: typeof potentialSupabaseError.details === 'string' ? potentialSupabaseError.details : null,
@@ -92,7 +131,6 @@ export async function GET(
       errorMessage = error;
       errorDetailsOutput = error;
     }
-    // ★★★ ここまで修正 ★★★
 
     return NextResponse.json({ error: errorMessage, details: errorDetailsOutput }, { status: 500 });
   }
