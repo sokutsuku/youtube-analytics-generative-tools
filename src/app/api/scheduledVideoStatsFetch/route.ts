@@ -141,8 +141,5 @@ export async function GET() {
 // 未使用引数を削除
 export async function GET_metadata() {
   console.log("Scheduled video metadata update job started (placeholder).");
-  // TODO: videosテーブルの last_metadata_fetched_at を見て、1日以上経過した動画の
-  // snippet, contentDetails を youtube.videos.list で取得し、
-  // videos テーブルを更新するロジックを実装する
   return NextResponse.json({ message: "Metadata update job placeholder." });
 }
