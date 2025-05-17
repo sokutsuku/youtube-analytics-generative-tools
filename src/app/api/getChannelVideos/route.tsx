@@ -31,14 +31,6 @@ interface VideoToSave {
   comment_count?: number | null;
 }
 
-interface VideoStatsLogToSave {
-  video_id: string; // Supabaseのvideosテーブルのid (uuid)
-  fetched_at?: string;
-  view_count?: number | null;
-  like_count?: number | null;
-  comment_count?: number | null;
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -88,7 +80,7 @@ export async function POST(request: NextRequest) {
       .map(item => item.contentDetails?.videoId)
       .filter(id => id != null) as string[];
 
-    let allFetchedVideosDetailed: VideoToSave[] = [];
+    const allFetchedVideosDetailed: VideoToSave[] = []; // 修正: const に変更
 
     // 3. 各動画の詳細情報をバッチで取得 (50件ずつ)
     for (let i = 0; i < videoIds.length; i += 50) {
@@ -142,7 +134,7 @@ export async function POST(request: NextRequest) {
         last_stat_logged_at: v.last_stat_logged_at,
       }));
 
-      const { data: upsertedVideos, error: videosUpsertError } = await supabaseAdmin
+      const { error: videosUpsertError } = await supabaseAdmin
         .from('videos')
         .upsert(videosToUpsert, { onConflict: 'youtube_video_id' })
         .select();
