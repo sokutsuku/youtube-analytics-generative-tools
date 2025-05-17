@@ -3,14 +3,11 @@ import { NextResponse } from 'next/server';
 import { google, youtube_v3 } from 'googleapis';
 import type { GaxiosResponse } from 'gaxios';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import type { NextRequest } from 'next/server';
 
 const youtube = google.youtube({
   version: 'v3',
   auth: process.env.YOUTUBE_API_KEY,
 });
-
-// VideoForStatUpdate インターフェースは未使用のため削除済み
 
 interface VideoStatsLogToSave {
   video_id: string;
@@ -19,11 +16,6 @@ interface VideoStatsLogToSave {
   like_count?: number | null;
   comment_count?: number | null;
 }
-
-// ★★★ getNextScheduledFetchTime 関数を削除 (未使用のため) ★★★
-// function getNextScheduledFetchTime(now: Date): Date {
-//   // ...
-// }
 
 export async function GET() {
   try {
@@ -70,7 +62,7 @@ export async function GET() {
         for (const videoData of videosDetailsResponse.data.items) {
           const correspondingVideoInDb = videosToUpdate.find(v => v.youtube_video_id === videoData.id);
           if (videoData.id && videoData.statistics && correspondingVideoInDb) {
-            const fetchedAtISO = new Date().toISOString(); // この時刻をログとスケジュール更新で統一
+            const fetchedAtISO = new Date().toISOString();
 
             videoStatsLogsToInsert.push({
               video_id: correspondingVideoInDb.id,
@@ -81,17 +73,14 @@ export async function GET() {
             });
 
             const publishedDate = new Date(correspondingVideoInDb.published_at || 0);
-            // currentTime を使う (fetchedAtISO と同じタイミングの now)
             const hoursSincePublished = (currentTime.getTime() - publishedDate.getTime()) / (1000 * 60 * 60);
-            
-            let nextFetchFrequencyHours = 24; // デフォルト24時間
+
+            let nextFetchFrequencyHours = 24;
             if (hoursSincePublished <= 24) {
               nextFetchFrequencyHours = 1;
             } else if (hoursSincePublished <= 72) {
               nextFetchFrequencyHours = 3;
             }
-            // テスト用に常に30分周期にする場合は、ここで固定値を設定
-            // nextFetchFrequencyHours = 0.5; // 30分
 
             const nextFetchTime = new Date(currentTime.getTime() + nextFetchFrequencyHours * 60 * 60 * 1000);
 
