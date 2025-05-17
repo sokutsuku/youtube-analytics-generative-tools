@@ -192,7 +192,7 @@ export default function HomePage() {
 
 
   return (
-    <main className="min-h-screen bg-gray-100 flex flex-col items-center p-4 space-y-12 mb-12">
+    <main className="min-h-screen bg-gray-100 flex flex-col items-center p-4 space-y-12">
       {/* --- 動画情報取得セクション (既存のまま) --- */}
       <section className="bg-white shadow-xl rounded-lg p-6 md:p-8 w-full max-w-2xl">
         {/* ... (既存の動画情報ゲッターUIは変更なし) ... */}
