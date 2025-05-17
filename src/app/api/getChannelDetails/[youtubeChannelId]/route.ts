@@ -2,7 +2,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-// インターフェース定義は変更なし
 interface ChannelDetailsForClient {
   id: string;
   youtube_channel_id: string;
@@ -33,18 +32,14 @@ interface SupabaseErrorDetail {
   code?: string | null;
 }
 
-// ApiRouteContext インターフェースは使用しません
+export async function GET(request: NextRequest) {
+  // パスパラメータの取得
+  const url = new URL(request.url);
+  // /api/getChannelDetails/[youtubeChannelId] の [youtubeChannelId] を取得
+  // 例: /api/getChannelDetails/UCxxxxxxx
+  const pathParts = url.pathname.split('/');
+  const youtubeChannelId = pathParts[pathParts.length - 1];
 
-export async function GET(
-  request: NextRequest,
-  // ★★★ 第二引数の型を Next.js の標準的な形に戻す ★★★
-  context: { params: { youtubeChannelId: string } }
-) {
-  const youtubeChannelId = context.params.youtubeChannelId;
-  // ★★★ ここまで修正 ★★★
-
-  // youtubeChannelId が文字列であることのチェックは、上記の型注釈でカバーされるため、
-  // 必須ではなくなるが、念のため残しても良い。
   if (typeof youtubeChannelId !== 'string' || !youtubeChannelId) {
     return NextResponse.json({ error: 'YouTube Channel ID is required and must be a string.' }, { status: 400 });
   }
@@ -68,8 +63,8 @@ export async function GET(
       .single();
 
     if (channelError) {
-        console.error(`Supabase error fetching channel (youtubeChannelId: ${youtubeChannelId}):`, JSON.stringify(channelError, null, 2));
-        throw channelError;
+      console.error(`Supabase error fetching channel (youtubeChannelId: ${youtubeChannelId}):`, JSON.stringify(channelError, null, 2));
+      throw channelError;
     }
     if (!channelData) {
       return NextResponse.json({ error: `Channel with ID ${youtubeChannelId} not found` }, { status: 404 });
@@ -93,16 +88,16 @@ export async function GET(
       .limit(50);
 
     if (videosError) {
-        console.error(`Supabase error fetching videos for channel (youtubeChannelId: ${youtubeChannelId}, internalChannelId: ${channelData.id}):`, JSON.stringify(videosError, null, 2));
-        throw videosError;
+      console.error(`Supabase error fetching videos for channel (youtubeChannelId: ${youtubeChannelId}, internalChannelId: ${channelData.id}):`, JSON.stringify(videosError, null, 2));
+      throw videosError;
     }
 
     const responseData: {
-        channel: ChannelDetailsForClient;
-        videos: VideoDetailsForClient[];
+      channel: ChannelDetailsForClient;
+      videos: VideoDetailsForClient[];
     } = {
-        channel: channelData as ChannelDetailsForClient,
-        videos: (videosData as VideoDetailsForClient[]) || [],
+      channel: channelData as ChannelDetailsForClient,
+      videos: (videosData as VideoDetailsForClient[]) || [],
     };
 
     return NextResponse.json(responseData);
@@ -113,19 +108,19 @@ export async function GET(
     let errorDetailsOutput: SupabaseErrorDetail | string = 'No further details available.';
 
     if (
-        typeof error === 'object' &&
-        error !== null &&
-        'message' in error &&
-        typeof (error as { message?: unknown }).message === 'string' &&
-        ('code' in error || 'details' in error || 'hint' in error)
+      typeof error === 'object' &&
+      error !== null &&
+      'message' in error &&
+      typeof (error as { message?: unknown }).message === 'string' &&
+      ('code' in error || 'details' in error || 'hint' in error)
     ) {
       const potentialSupabaseError = error as SupabaseErrorDetail;
       errorMessage = potentialSupabaseError.message;
       errorDetailsOutput = {
-          message: potentialSupabaseError.message,
-          details: typeof potentialSupabaseError.details === 'string' ? potentialSupabaseError.details : null,
-          hint: typeof potentialSupabaseError.hint === 'string' ? potentialSupabaseError.hint : null,
-          code: typeof potentialSupabaseError.code === 'string' ? potentialSupabaseError.code : null,
+        message: potentialSupabaseError.message,
+        details: typeof potentialSupabaseError.details === 'string' ? potentialSupabaseError.details : null,
+        hint: typeof potentialSupabaseError.hint === 'string' ? potentialSupabaseError.hint : null,
+        code: typeof potentialSupabaseError.code === 'string' ? potentialSupabaseError.code : null,
       };
     } else if (error instanceof Error) {
       errorMessage = error.message;
