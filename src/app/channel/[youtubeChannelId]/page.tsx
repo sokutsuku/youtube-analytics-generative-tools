@@ -51,23 +51,20 @@ async function getChannelPageData(youtubeChannelId: string): Promise<{
       .single();
 
     if (channelError) {
-      console.error('Supabase error fetching channel (getChannelPageData):', JSON.stringify(channelError, null, 2));
       throw channelError;
     }
     if (!channelData) {
-      console.error('Channel data not found in DB (getChannelPageData) for youtube_channel_id:', youtubeChannelId);
       return { channel: null, videos: [], error: `Channel with ID ${youtubeChannelId} not found in our database.` };
     }
 
     const { data: videosData, error: videosError } = await supabaseAdmin
       .from('videos')
-      .select('id, youtube_video_id, title, thumbnail_url, published_at') // view_countなどは削除済み
+      .select('id, youtube_video_id, title, thumbnail_url, published_at')
       .eq('channel_id', channelData.id)
       .order('published_at', { ascending: false })
       .limit(50);
 
     if (videosError) {
-      console.error('Supabase error fetching videos (getChannelPageData):', JSON.stringify(videosError, null, 2));
       throw videosError;
     }
 
@@ -76,7 +73,6 @@ async function getChannelPageData(youtubeChannelId: string): Promise<{
       videos: (videosData as VideoDetailsForClient[]) || [],
     };
   } catch (error: unknown) {
-    console.error('Critical error in getChannelPageData for youtubeChannelId:', youtubeChannelId, error);
     let errorMessage = 'An unknown error occurred while fetching channel page data.';
     let errorDetailsOutput: SupabaseErrorDetail | string = 'No further details available.';
 
@@ -84,22 +80,17 @@ async function getChannelPageData(youtubeChannelId: string): Promise<{
       const potentialSupabaseError = error as Partial<SupabaseErrorDetail>;
       errorMessage = typeof potentialSupabaseError.message === 'string' ? potentialSupabaseError.message : errorMessage;
       errorDetailsOutput = {
-          message: typeof potentialSupabaseError.message === 'string' ? potentialSupabaseError.message : 'Error message not available.',
-          details: typeof potentialSupabaseError.details === 'string' ? potentialSupabaseError.details : null,
-          hint: typeof potentialSupabaseError.hint === 'string' ? potentialSupabaseError.hint : null,
-          code: typeof potentialSupabaseError.code === 'string' ? potentialSupabaseError.code : null,
+        message: typeof potentialSupabaseError.message === 'string' ? potentialSupabaseError.message : 'Error message not available.',
+        details: typeof potentialSupabaseError.details === 'string' ? potentialSupabaseError.details : null,
+        hint: typeof potentialSupabaseError.hint === 'string' ? potentialSupabaseError.hint : null,
+        code: typeof potentialSupabaseError.code === 'string' ? potentialSupabaseError.code : null,
       };
-      console.error('Formatted Supabase Error (getChannelPageData):', JSON.stringify(errorDetailsOutput, null, 2));
     } else if (error instanceof Error) {
       errorMessage = error.message;
       errorDetailsOutput = error.stack || errorMessage;
-      console.error('JavaScript Error (getChannelPageData):', error);
     } else if (typeof error === 'string') {
       errorMessage = error;
       errorDetailsOutput = error;
-      console.error('String Error (getChannelPageData):', error);
-    } else {
-      console.error('Unknown error type (getChannelPageData):', error);
     }
     return { channel: null, videos: [], error: errorMessage, errorDetails: errorDetailsOutput };
   }
@@ -107,7 +98,9 @@ async function getChannelPageData(youtubeChannelId: string): Promise<{
 
 // ★★★ ChannelPage コンポーネントの props の型注釈を変更 ★★★
 export default async function ChannelPage(props: PageProps) {
-  const { youtubeChannelId } = props.params;
+  // paramsがPromiseの場合も考慮してawait
+  const params = await props.params;
+  const youtubeChannelId = params.youtubeChannelId;
 
   if (!youtubeChannelId || typeof youtubeChannelId !== 'string') {
     return <div className="container mx-auto p-4 text-red-500">Error: Channel ID not found in params or is not a string.</div>;
