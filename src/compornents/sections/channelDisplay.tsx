@@ -24,10 +24,9 @@ interface VideoDetailsForClient {
   title?: string | null;
   thumbnail_url?: string | null;
   published_at?: string | null;
-  // videosテーブルにキャッシュする最新統計 (オプショナル)
-  view_count?: number | null;
-  like_count?: number | null;
-  comment_count?: number | null;
+  view_count?: number | null; // videosテーブルにキャッシュする最新統計 (オプショナル)
+  like_count?: number | null;  // videosテーブルにキャッシュする最新統計 (オプショナル)
+  comment_count?: number | null;// videosテーブルにキャッシュする最新統計 (オプショナル)
 }
 
 interface VideoStatLogItem {
@@ -71,22 +70,20 @@ const AccordionItem: React.FC<{
 }> = ({ video, fetchStatsLog }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [statsLog, setStatsLog] = useState<VideoStatLogItem[] | null>(null);
-  const [latestStatsInAccordion, setLatestStatsInAccordion] = useState<VideoStatLogItem | null>(null); // アコーディオン内で表示する最新統計
+  const [latestStatsInAccordion, setLatestStatsInAccordion] = useState<VideoStatLogItem | null>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
   const [statsError, setStatsError] = useState<string>('');
 
   const handleToggleAccordion = async () => {
     const newIsOpen = !isOpen;
     setIsOpen(newIsOpen);
-    // アコーディオンを開き、かつまだ統計履歴も最新統計も読み込まれていない場合に取得
     if (newIsOpen && !statsLog && !latestStatsInAccordion) {
       setIsLoadingStats(true);
       setStatsError('');
       try {
-        const logData = await fetchStatsLog(video.id); // video.id はSupabaseのvideosテーブルの主キー
-        setStatsLog(logData || []); // null の場合は空配列に
+        const logData = await fetchStatsLog(video.id);
+        setStatsLog(logData || []);
         if (logData && logData.length > 0) {
-          // ログデータは fetched_at で昇順ソートされている前提
           setLatestStatsInAccordion(logData[logData.length - 1]);
         }
       } catch (err: unknown) {
@@ -101,7 +98,6 @@ const AccordionItem: React.FC<{
     }
   };
 
-  // video prop から直接最新統計情報を表示 (初期表示用、キャッシュされている場合)
   const initialDisplayStats = {
     view_count: video.view_count,
     like_count: video.like_count,
@@ -117,19 +113,19 @@ const AccordionItem: React.FC<{
       >
         <div className="flex items-center space-x-3 min-w-0">
           {video.thumbnail_url && (
+            // ★★★ <img> を <Image> に修正 ★★★
             <div className="w-20 h-12 relative rounded-md overflow-hidden flex-shrink-0">
               <Image
                 src={video.thumbnail_url}
                 alt={video.title || 'Video thumbnail'}
                 layout="fill"
                 objectFit="cover"
-                priority={false} // リスト内の画像なのでpriorityはfalseで良い場合が多い
+                // priority={false} // リスト内なので通常はfalseで良い
               />
             </div>
           )}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-800 truncate" title={video.title || ''}>{video.title || 'タイトルなし'}</p>
-            {/* 初期表示では VideoDetailsForClient の統計情報を表示 */}
             <p className="text-xs text-gray-500">
               再生: {formatCount(initialDisplayStats.view_count)} | いいね: {formatCount(initialDisplayStats.like_count)} | コメント: {formatCount(initialDisplayStats.comment_count)}
             </p>
@@ -151,11 +147,10 @@ const AccordionItem: React.FC<{
               collapsed: { opacity: 0, height: 0, marginTop: '0px', marginBottom: '0px' },
             }}
             transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="px-3 pb-3 text-sm" // pxを少し増やす
+            className="px-3 pb-3 text-sm"
           >
             {isLoadingStats && <p className="text-gray-500 py-2">統計履歴を読み込み中...</p>}
             {statsError && <p className="text-red-500 py-2">{statsError}</p>}
-            {/* アコーディオン内に最新統計を再表示 (fetch後) */}
             {latestStatsInAccordion && !isLoadingStats && !statsError && (
                  <p className="text-xs text-gray-700 font-semibold mb-2 py-1 border-b">
                     最新ログ: 再: {formatCount(latestStatsInAccordion.view_count)}, 👍: {formatCount(latestStatsInAccordion.like_count)}, 💬: {formatCount(latestStatsInAccordion.comment_count)} ({formatDate(latestStatsInAccordion.fetched_at)})
@@ -164,11 +159,11 @@ const AccordionItem: React.FC<{
             {statsLog && statsLog.length > 0 && (
               <div className="mt-2 space-y-1 max-h-60 overflow-y-auto border p-2 rounded-md bg-gray-50">
                 <p className="font-semibold text-xs text-gray-700 mb-1">変遷履歴 (新しい順):</p>
-                {statsLog.slice().reverse().map((log, index) => ( // 新しい順に表示
-                  <div key={index} className="text-xs text-gray-600 border-b last:border-b-0 py-1 flex justify-between">
-                    <span className="font-medium">{formatDate(log.fetched_at)}:</span>
-                    <span>再: {formatCount(log.view_count)}</span>
-                    <span>👍: {formatCount(log.like_count)}</span>
+                {statsLog.slice().reverse().map((log, index) => (
+                  <div key={index} className="text-xs text-gray-600 border-b last:border-b-0 py-1 flex justify-between flex-wrap"> {/* flex-wrap を追加 */}
+                    <span className="font-medium mr-2">{formatDate(log.fetched_at)}:</span>
+                    <span className="mr-2">再: {formatCount(log.view_count)}</span>
+                    <span className="mr-2">👍: {formatCount(log.like_count)}</span>
                     <span>💬: {formatCount(log.comment_count)}</span>
                   </div>
                 ))}
@@ -186,7 +181,7 @@ const AccordionItem: React.FC<{
 
 
 export default function ChannelDisplay({ initialChannel, initialVideos }: ChannelDisplayProps) {
-  // propsを直接利用するため、useStateは不要
+  // ★★★ propsを直接利用するため、useStateとセッターは削除 ★★★
   const channel = initialChannel;
   const videos = initialVideos;
 
@@ -203,22 +198,23 @@ export default function ChannelDisplay({ initialChannel, initialVideos }: Channe
       throw new Error(errorDetails);
     }
     const data = await response.json();
-    return (data as VideoStatLogItem[]) || []; // nullの場合も空配列に
+    return (data as VideoStatLogItem[]) || [];
   };
 
   return (
-    <div className="space-y-10"> {/* space-yを調整 */}
+    <div className="space-y-10">
       {/* チャンネル基本情報 */}
       <section className="bg-white shadow-xl rounded-lg p-6">
         <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6 mb-6">
           {channel.thumbnail_url && (
+            // ★★★ <img> を <Image> に修正 ★★★
             <div className="w-28 h-28 relative rounded-full shadow-lg overflow-hidden flex-shrink-0">
               <Image
                 src={channel.thumbnail_url}
                 alt={channel.title || 'Channel thumbnail'}
                 layout="fill"
                 objectFit="cover"
-                priority // ページのメイン画像の一つなのでpriorityをtrueに
+                priority // ページの主要な画像なのでtrue
               />
             </div>
           )}
@@ -245,7 +241,7 @@ export default function ChannelDisplay({ initialChannel, initialVideos }: Channe
       <section className="bg-white shadow-xl rounded-lg p-6">
         <h2 className="text-2xl font-semibold text-gray-700 mb-6">動画一覧 ({videos.length > 0 ? `${videos.length}件` : 'なし'})</h2>
         {videos.length > 0 ? (
-          <div className="divide-y divide-gray-200"> {/* 区切り線を追加 */}
+          <div className="divide-y divide-gray-200">
             {videos.map((video) => (
               <AccordionItem key={video.id} video={video} fetchStatsLog={fetchVideoStatsLog} />
             ))}
