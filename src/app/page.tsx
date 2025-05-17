@@ -1,9 +1,7 @@
 // src/app/page.tsx
-// このファイルは前回の修正のままでOK (ClientHomePageContent に props を渡していない)
-
 import Link from 'next/link';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import ClientHomePageContent from '@/compornents/sections/ClientHomePageContent';
+import ClientHomePageContent from '@/compornents/sections/clientHomePageContent';
 
 export interface ListedChannelInfo {
   id: string;
@@ -51,12 +49,11 @@ export default async function HomePage() {
                   className="flex items-center space-x-4 p-3 group"
                 >
                   {channel.thumbnail_url ? (
-                    <img // ← ここも <Image> に変更推奨 (next.config.js の設定も必要)
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img 
                       src={channel.thumbnail_url}
                       alt={channel.title || 'Channel Thumbnail'}
                       className="w-14 h-14 rounded-full object-cover flex-shrink-0 border border-gray-200"
-                      // Next.js <Image> を使う場合は width と height が必要になることが多い
-                      // width={56} height={56} // 例
                     />
                   ) : (
                     <div className="w-14 h-14 rounded-full bg-gray-200 flex items-center justify-center text-gray-400 flex-shrink-0">
@@ -88,7 +85,7 @@ export default async function HomePage() {
         </p>
       </section>
 
-      <ClientHomePageContent /> {/* propsなしで呼び出し */}
+      <ClientHomePageContent />
     </main>
   );
 }
