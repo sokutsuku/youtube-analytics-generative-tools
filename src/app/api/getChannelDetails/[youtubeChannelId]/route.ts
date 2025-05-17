@@ -1,5 +1,5 @@
 // src/app/api/getChannelDetails/[youtubeChannelId]/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { type NextRequest, NextResponse } from 'next/server'; // NextRequest を型としてインポート
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 // フロントエンドに返すチャンネル情報の型
@@ -35,11 +35,19 @@ interface SupabaseErrorDetail {
   code?: string | null;
 }
 
+// APIルートの第二引数 context の型を定義
+interface RouteContext {
+  params: {
+    youtubeChannelId: string;
+  };
+}
+
 export async function GET(
   request: NextRequest, // 第一引数
-  { params }: { params: { youtubeChannelId: string } } // 第二引数を分割代入で受け取る
+  context: RouteContext   // ★★★ 第二引数を RouteContext 型として受け取る ★★★
 ) {
-  const youtubeChannelId = params.youtubeChannelId;
+  // ★★★ context から params を経由して youtubeChannelId を取り出す ★★★
+  const youtubeChannelId = context.params.youtubeChannelId;
 
   if (!youtubeChannelId) {
     return NextResponse.json({ error: 'YouTube Channel ID is required' }, { status: 400 });
@@ -65,10 +73,9 @@ export async function GET(
 
     if (channelError) {
         console.error('Supabase error fetching channel (getChannelDetails):', JSON.stringify(channelError, null, 2));
-        throw channelError; // エラーをcatchブロックで処理
+        throw channelError;
     }
     if (!channelData) {
-      // .single() でエラーがない場合、channelDataは通常存在するが、念のため
       return NextResponse.json({ error: `Channel with ID ${youtubeChannelId} not found` }, { status: 404 });
     }
 
@@ -85,21 +92,21 @@ export async function GET(
         like_count,
         comment_count
       `)
-      .eq('channel_id', channelData.id) // channelsテーブルの内部IDで紐付け
+      .eq('channel_id', channelData.id)
       .order('published_at', { ascending: false })
       .limit(50);
 
     if (videosError) {
         console.error('Supabase error fetching videos (getChannelDetails):', JSON.stringify(videosError, null, 2));
-        throw videosError; // エラーをcatchブロックで処理
+        throw videosError;
     }
 
     const responseData: {
         channel: ChannelDetailsForClient;
         videos: VideoDetailsForClient[];
     } = {
-        channel: channelData as ChannelDetailsForClient, // 型アサーション
-        videos: (videosData as VideoDetailsForClient[]) || [], // videosData が null の場合は空配列
+        channel: channelData as ChannelDetailsForClient,
+        videos: (videosData as VideoDetailsForClient[]) || [],
     };
 
     return NextResponse.json(responseData);
@@ -110,7 +117,7 @@ export async function GET(
     let errorDetailsOutput: SupabaseErrorDetail | string = 'No further details available.';
 
     if (typeof error === 'object' && error !== null && 'message' in error) {
-      const potentialSupabaseError = error as Partial<SupabaseErrorDetail>; // Partialで一部プロパティを許容
+      const potentialSupabaseError = error as Partial<SupabaseErrorDetail>;
       errorMessage = typeof potentialSupabaseError.message === 'string' ? potentialSupabaseError.message : errorMessage;
       errorDetailsOutput = {
           message: typeof potentialSupabaseError.message === 'string' ? potentialSupabaseError.message : 'Error message not available.',
