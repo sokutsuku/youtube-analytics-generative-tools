@@ -1,17 +1,18 @@
 // src/app/api/getChannelVideos/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { google, youtube_v3 } from 'googleapis';
-import { supabaseAdmin } from '@/lib/supabaseAdmin'; // Supabase管理者クライアント
+import type { GaxiosResponse } from 'gaxios'; // GaxiosResponseをインポート (やはり必要)
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 const youtube = google.youtube({
   version: 'v3',
   auth: process.env.YOUTUBE_API_KEY,
 });
 
-// videosテーブルとvideo_stats_logsテーブルに保存する際の型 (再利用または新規定義)
+// VideoToSave インターフェース定義は変更なし
 interface VideoToSave {
   youtube_video_id: string;
-  channel_id: string; // Supabaseのchannelsテーブルのid (uuid)
+  channel_id: string;
   title?: string | null;
   description?: string | null;
   published_at?: string | null;
@@ -19,28 +20,25 @@ interface VideoToSave {
   duration?: string | null;
   tags?: string[] | null;
   category_id?: string | null;
-  // スケジュール管理用
   next_stat_fetch_at?: string | null;
   stat_fetch_frequency_hours?: number | null;
   last_stat_logged_at?: string | null;
-  // 外部キーとして利用するチャンネルのyoutube_channel_idも一時的に保持
   youtube_channel_id_for_fk?: string | null;
-  // 統計情報
   view_count?: number | null;
   like_count?: number | null;
   comment_count?: number | null;
 }
 
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { youtubeChannelId } = body; // フロントからチャンネルのYouTube IDを受け取る
+    const { youtubeChannelId } = body;
 
     if (!youtubeChannelId) {
       return NextResponse.json({ message: 'YouTube Channel ID is required' }, { status: 400 });
     }
 
-    // 1. Supabaseからチャンネルの内部IDとuploads_playlist_idを取得
     const { data: channelData, error: channelError } = await supabaseAdmin
       .from('channels')
       .select('id, uploads_playlist_id')
@@ -51,25 +49,29 @@ export async function POST(request: NextRequest) {
       console.error('Error fetching channel from Supabase or uploads_playlist_id missing:', channelError);
       return NextResponse.json({ message: 'Failed to find channel or its uploads playlist ID in DB' }, { status: 404 });
     }
-    const supabaseChannelId = channelData.id; // Supabase内のchannelsテーブルの主キー
+    const supabaseChannelId = channelData.id;
     const uploadsPlaylistId = channelData.uploads_playlist_id;
 
     let allVideoItems: youtube_v3.Schema$PlaylistItem[] = [];
     let nextPageToken: string | undefined | null = undefined;
 
-    // 2. プレイリスト内の全動画アイテムを取得 (ページネーション対応)
     do {
-      const playlistItemsResponse = await youtube.playlistItems.list({
+      // ★★★ ここから修正 ★★★
+      const response: GaxiosResponse<youtube_v3.Schema$PlaylistItemListResponse> = // 型注釈を追加
+        await youtube.playlistItems.list({
+      // ★★★ ここまで修正 ★★★
         part: ['snippet', 'contentDetails'],
         playlistId: uploadsPlaylistId,
-        maxResults: 50, // 最大50件ずつ
+        maxResults: 50,
         pageToken: nextPageToken || undefined,
       });
 
-      if (playlistItemsResponse.data.items) {
-        allVideoItems = allVideoItems.concat(playlistItemsResponse.data.items);
+      const playlistItemsData = response.data; // response.data は Schema$PlaylistItemListResponse | undefined | null 型
+
+      if (playlistItemsData && playlistItemsData.items) {
+        allVideoItems = allVideoItems.concat(playlistItemsData.items);
       }
-      nextPageToken = playlistItemsResponse.data.nextPageToken;
+      nextPageToken = playlistItemsData?.nextPageToken;
     } while (nextPageToken);
 
     if (allVideoItems.length === 0) {
@@ -80,22 +82,26 @@ export async function POST(request: NextRequest) {
       .map(item => item.contentDetails?.videoId)
       .filter(id => id != null) as string[];
 
-    const allFetchedVideosDetailed: VideoToSave[] = []; // 修正: const に変更
+    const allFetchedVideosDetailed: VideoToSave[] = [];
 
-    // 3. 各動画の詳細情報をバッチで取得 (50件ずつ)
     for (let i = 0; i < videoIds.length; i += 50) {
       const batchVideoIds = videoIds.slice(i, i + 50);
-      const videosResponse = await youtube.videos.list({
+      // ★★★ ここから修正 ★★★
+      const response: GaxiosResponse<youtube_v3.Schema$VideoListResponse> = // 型注釈を追加
+        await youtube.videos.list({
+      // ★★★ ここまで修正 ★★★
         part: ['snippet', 'statistics', 'contentDetails'],
         id: batchVideoIds,
       });
 
-      if (videosResponse.data.items) {
-        videosResponse.data.items.forEach(video => {
-          if (video.id) { // video.id (youtube_video_id) が存在することを確認
+      const videosData = response.data; // response.data は Schema$VideoListResponse | undefined | null 型
+
+      if (videosData && videosData.items) {
+        videosData.items.forEach((video: youtube_v3.Schema$Video) => {
+          if (video.id) {
             const videoToSave: VideoToSave = {
               youtube_video_id: video.id,
-              channel_id: supabaseChannelId, // Supabaseのchannels.idをセット
+              channel_id: supabaseChannelId,
               title: video.snippet?.title,
               description: video.snippet?.description,
               published_at: video.snippet?.publishedAt,
@@ -106,10 +112,10 @@ export async function POST(request: NextRequest) {
               view_count: video.statistics?.viewCount ? parseInt(video.statistics.viewCount, 10) : null,
               like_count: video.statistics?.likeCount ? parseInt(video.statistics.likeCount, 10) : null,
               comment_count: video.statistics?.commentCount ? parseInt(video.statistics.commentCount, 10) : null,
-              next_stat_fetch_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(), // 1時間後
+              next_stat_fetch_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
               stat_fetch_frequency_hours: 1,
-              last_stat_logged_at: new Date().toISOString(), // 初回ログは今すぐ
-              youtube_channel_id_for_fk: video.snippet?.channelId // 念のため元のチャンネルIDも保持
+              last_stat_logged_at: new Date().toISOString(),
+              youtube_channel_id_for_fk: video.snippet?.channelId
             };
             allFetchedVideosDetailed.push(videoToSave);
           }
@@ -117,7 +123,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. SupabaseのvideosテーブルにUpsert
     if (allFetchedVideosDetailed.length > 0) {
       const videosToUpsert = allFetchedVideosDetailed.map(v => ({
         youtube_video_id: v.youtube_video_id,
