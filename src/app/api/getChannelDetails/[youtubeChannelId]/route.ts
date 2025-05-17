@@ -37,13 +37,15 @@ interface SupabaseErrorDetail {
 
 export async function GET(
   request: NextRequest,
-  // ★★★ 第二引数の params の中の型を any にしてみる ★★★
-  context: { params: { youtubeChannelId: any } }
+  // ★★★ 第二引数の型を Next.js の標準的な形に戻す ★★★
+  context: { params: { youtubeChannelId: string } }
 ) {
-  // ★★★ youtubeChannelId の型を string にアサーション ★★★
-  const youtubeChannelId = context.params.youtubeChannelId as string;
+  const youtubeChannelId = context.params.youtubeChannelId;
+  // ★★★ ここまで修正 ★★★
 
-  if (!youtubeChannelId || typeof youtubeChannelId !== 'string') { // typeofチェックは残す
+  // youtubeChannelId が文字列であることのチェックは、上記の型注釈でカバーされるため、
+  // 必須ではなくなるが、念のため残しても良い。
+  if (typeof youtubeChannelId !== 'string' || !youtubeChannelId) {
     return NextResponse.json({ error: 'YouTube Channel ID is required and must be a string.' }, { status: 400 });
   }
 
