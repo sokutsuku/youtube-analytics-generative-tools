@@ -10,13 +10,7 @@ const youtube = google.youtube({
   auth: process.env.YOUTUBE_API_KEY,
 });
 
-// ★★★ VideoForStatUpdate インターフェースを削除 ★★★
-// interface VideoForStatUpdate {
-//   id: string;
-//   youtube_video_id: string;
-//   published_at?: string | null;
-//   stat_fetch_frequency_hours?: number | null;
-// }
+// VideoForStatUpdate インターフェースは未使用のため削除済み
 
 interface VideoStatsLogToSave {
   video_id: string;
@@ -26,25 +20,19 @@ interface VideoStatsLogToSave {
   comment_count?: number | null;
 }
 
-function getNextScheduledFetchTime(now: Date): Date {
-  const currentMinutes = now.getMinutes();
-  const scheduledTime = new Date(now.getTime());
-  if (currentMinutes < 30) {
-    scheduledTime.setMinutes(30, 0, 0);
-  } else {
-    scheduledTime.setHours(now.getHours() + 1, 0, 0, 0);
-  }
-  return scheduledTime;
-}
+// ★★★ getNextScheduledFetchTime 関数を削除 (未使用のため) ★★★
+// function getNextScheduledFetchTime(now: Date): Date {
+//   // ...
+// }
 
-export async function GET(_request: NextRequest) { // ★★★ _request は使用しないことを明示 (型は残す) ★★★
+export async function GET(_request: NextRequest) { // _request は使用しないことを明示 (ESLint設定で無視されることを期待)
   try {
     const currentTime = new Date();
     console.log(`[${currentTime.toISOString()}] Scheduled video stats fetch job started.`);
 
     const { data: videosToUpdate, error: fetchError } = await supabaseAdmin
       .from('videos')
-      .select('id, youtube_video_id, published_at, stat_fetch_frequency_hours') // stat_fetch_frequency_hoursも取得
+      .select('id, youtube_video_id, published_at, stat_fetch_frequency_hours')
       .lte('next_stat_fetch_at', currentTime.toISOString());
 
     if (fetchError) {
@@ -60,7 +48,6 @@ export async function GET(_request: NextRequest) { // ★★★ _request は使�
     console.log(`Found ${videosToUpdate.length} videos to update stats.`);
     const videoIdsToFetch = videosToUpdate.map(v => v.youtube_video_id);
     const videoStatsLogsToInsert: VideoStatsLogToSave[] = [];
-    // videoScheduleUpdates の型を具体的に定義
     const videoScheduleUpdates: Array<{
       id: string;
       next_stat_fetch_at: string;
@@ -68,7 +55,7 @@ export async function GET(_request: NextRequest) { // ★★★ _request は使�
       view_count?: number | null;
       like_count?: number | null;
       comment_count?: number | null;
-      stat_fetch_frequency_hours?: number | null; // 必要なら追加
+      stat_fetch_frequency_hours?: number | null;
     }> = [];
 
     for (let i = 0; i < videoIdsToFetch.length; i += 50) {
@@ -83,7 +70,7 @@ export async function GET(_request: NextRequest) { // ★★★ _request は使�
         for (const videoData of videosDetailsResponse.data.items) {
           const correspondingVideoInDb = videosToUpdate.find(v => v.youtube_video_id === videoData.id);
           if (videoData.id && videoData.statistics && correspondingVideoInDb) {
-            const fetchedAtISO = new Date().toISOString();
+            const fetchedAtISO = new Date().toISOString(); // この時刻をログとスケジュール更新で統一
 
             videoStatsLogsToInsert.push({
               video_id: correspondingVideoInDb.id,
@@ -93,30 +80,26 @@ export async function GET(_request: NextRequest) { // ★★★ _request は使�
               comment_count: videoData.statistics.commentCount ? parseInt(videoData.statistics.commentCount, 10) : null,
             });
 
-            // 次の取得時刻と頻度を決定するロジック (より詳細に)
             const publishedDate = new Date(correspondingVideoInDb.published_at || 0);
+            // currentTime を使う (fetchedAtISO と同じタイミングの now)
             const hoursSincePublished = (currentTime.getTime() - publishedDate.getTime()) / (1000 * 60 * 60);
             
             let nextFetchFrequencyHours = 24; // デフォルト24時間
-            // ユーザー定義の取得頻度ロジック (例)
             if (hoursSincePublished <= 24) {
-              nextFetchFrequencyHours = 1; // 1時間ごと
+              nextFetchFrequencyHours = 1;
             } else if (hoursSincePublished <= 72) {
-              nextFetchFrequencyHours = 3; // 3時間ごと
+              nextFetchFrequencyHours = 3;
             }
-            // テスト用: 常に30分ごとにするなら固定値 (0.5時間)
-            // nextFetchFrequencyHours = 0.5; 
+            // テスト用に常に30分周期にする場合は、ここで固定値を設定
+            // nextFetchFrequencyHours = 0.5; // 30分
 
-            // const nextFetchTime = getNextScheduledFetchTime(new Date()); // これは「次の正時/30分」固定
             const nextFetchTime = new Date(currentTime.getTime() + nextFetchFrequencyHours * 60 * 60 * 1000);
-
 
             videoScheduleUpdates.push({
               id: correspondingVideoInDb.id,
               last_stat_logged_at: fetchedAtISO,
               next_stat_fetch_at: nextFetchTime.toISOString(),
-              stat_fetch_frequency_hours: nextFetchFrequencyHours, // 更新後の頻度も保存
-              // videosテーブルにキャッシュする統計情報
+              stat_fetch_frequency_hours: nextFetchFrequencyHours,
               view_count: videoData.statistics.viewCount ? parseInt(videoData.statistics.viewCount, 10) : null,
               like_count: videoData.statistics.likeCount ? parseInt(videoData.statistics.likeCount, 10) : null,
               comment_count: videoData.statistics.commentCount ? parseInt(videoData.statistics.commentCount, 10) : null,
@@ -157,7 +140,7 @@ export async function GET(_request: NextRequest) { // ★★★ _request は使�
       console.log(`Updated schedules for ${videoScheduleUpdates.length} videos.`);
     }
 
-    return NextResponse.json({ message: `Processed stats for ${videosToUpdate.length} videos.` });
+    return NextResponse.json({ message: `Processed stats for ${videosToUpdate?.length || 0} videos.` });
 
   } catch (error: unknown) {
     console.error('Error in scheduledVideoStatsFetch:', error);
