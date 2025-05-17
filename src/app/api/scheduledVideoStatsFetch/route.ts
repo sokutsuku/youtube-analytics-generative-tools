@@ -138,5 +138,5 @@ async function GET() {
   }
 }
 
-// デフォルトエクスポートとしてGETをエクスポート
+// デフォルトエクスポートのみ
 export default GET;
