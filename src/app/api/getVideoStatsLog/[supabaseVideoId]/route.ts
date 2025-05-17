@@ -1,19 +1,19 @@
 // src/app/api/getVideoStatsLog/[supabaseVideoId]/route.ts
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 interface VideoStatLog {
-    fetched_at: string;
-    view_count?: number | null;
-    like_count?: number | null;
-    comment_count?: number | null;
+  fetched_at: string;
+  view_count?: number | null;
+  like_count?: number | null;
+  comment_count?: number | null;
 }
 
-export async function GET(
-  request: Request,
-  { params }: { params: { supabaseVideoId: string } }
-) {
-  const supabaseVideoId = params.supabaseVideoId;
+export async function GET(request: NextRequest) {
+  // URLからsupabaseVideoIdを抽出
+  const url = new URL(request.url);
+  const pathParts = url.pathname.split('/');
+  const supabaseVideoId = pathParts[pathParts.length - 1];
 
   if (!supabaseVideoId) {
     return NextResponse.json({ error: 'Supabase Video ID is required' }, { status: 400 });
@@ -24,12 +24,11 @@ export async function GET(
       .from('video_stats_logs')
       .select('fetched_at, view_count, like_count, comment_count')
       .eq('video_id', supabaseVideoId)
-      .order('fetched_at', { ascending: true }); // 時系列で昇順に
+      .order('fetched_at', { ascending: true });
 
     if (statsLogError) throw statsLogError;
 
     return NextResponse.json(statsLogData as VideoStatLog[] || []);
-
   } catch (error: unknown) {
     console.error('Error fetching video stats log:', error);
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
