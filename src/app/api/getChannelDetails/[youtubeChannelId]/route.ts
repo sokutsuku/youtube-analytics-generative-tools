@@ -2,9 +2,9 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-// ★★★ インターフェース定義にプロパティを正しく記述 ★★★
+// インターフェース定義は変更なし
 interface ChannelDetailsForClient {
-  id: string; // Supabaseのchannelsテーブルのid (uuid)
+  id: string;
   youtube_channel_id: string;
   title?: string | null;
   description?: string | null;
@@ -16,16 +16,15 @@ interface ChannelDetailsForClient {
 }
 
 interface VideoDetailsForClient {
-  id: string; // Supabaseのvideosテーブルのid (uuid)
+  id: string;
   youtube_video_id: string;
   title?: string | null;
   thumbnail_url?: string | null;
   published_at?: string | null;
-  view_count?: number | null; // videosテーブルにキャッシュしている最新統計
-  like_count?: number | null;  // videosテーブルにキャッシュしている最新統計
-  comment_count?: number | null;// videosテーブルにキャッシュしている最新統計
+  view_count?: number | null;
+  like_count?: number | null;
+  comment_count?: number | null;
 }
-// ★★★ ここまで ★★★
 
 interface SupabaseErrorDetail {
   message: string;
@@ -34,21 +33,25 @@ interface SupabaseErrorDetail {
   code?: string | null;
 }
 
-interface ApiRouteContext {
-  params?: { [key: string]: string | string[] | undefined };
-}
+// ApiRouteContext インターフェースは削除しても良い、または以下のようにNext.jsが期待する形に合わせる
+// interface ApiRouteContext {
+//   params: { youtubeChannelId: string };
+// }
 
 export async function GET(
   request: NextRequest,
-  context: ApiRouteContext
+  // ★★★ 第二引数の型をNext.jsの標準的な形に ★★★
+  context: { params: { youtubeChannelId: string } }
 ) {
-  const youtubeChannelId = context.params?.youtubeChannelId;
+  const youtubeChannelId = context.params.youtubeChannelId;
+  // ★★★ ここまで修正 ★★★
 
-  if (typeof youtubeChannelId !== 'string' || !youtubeChannelId) {
-    return NextResponse.json({ error: 'YouTube Channel ID is required and must be a string.' }, { status: 400 });
+  if (!youtubeChannelId) { // typeof チェックは params の型定義で string が保証されるため不要になることが多い
+    return NextResponse.json({ error: 'YouTube Channel ID is required' }, { status: 400 });
   }
 
   try {
+    // 1. チャンネル基本情報を取得
     const { data: channelData, error: channelError } = await supabaseAdmin
       .from('channels')
       .select(`
@@ -73,6 +76,7 @@ export async function GET(
       return NextResponse.json({ error: `Channel with ID ${youtubeChannelId} not found` }, { status: 404 });
     }
 
+    // 2. そのチャンネルの動画一覧を取得
     const { data: videosData, error: videosError } = await supabaseAdmin
       .from('videos')
       .select(`
@@ -81,9 +85,9 @@ export async function GET(
         title,
         thumbnail_url,
         published_at,
-        view_count, 
+        view_count,
         like_count,
-        comment_count 
+        comment_count
       `)
       .eq('channel_id', channelData.id)
       .order('published_at', { ascending: false })
