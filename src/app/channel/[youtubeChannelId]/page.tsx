@@ -1,5 +1,5 @@
 // src/app/channel/[youtubeChannelId]/page.tsx
-import ChannelDisplay from '@/components/sections/channelDisplay';
+import ChannelDisplay from '@/compornents/sections/channelDisplay';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 // フロントエンドに返すチャンネル情報の型
