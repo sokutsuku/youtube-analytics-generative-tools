@@ -2,9 +2,9 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-// フロントエンドに返すチャンネル情報の型
+// インターフェース定義は変更なし
 interface ChannelDetailsForClient {
-  id: string; // Supabaseのchannelsテーブルのid (uuid)
+  id: string;
   youtube_channel_id: string;
   title?: string | null;
   description?: string | null;
@@ -15,9 +15,8 @@ interface ChannelDetailsForClient {
   total_view_count?: number | null;
 }
 
-// フロントエンドに返す動画情報の型
 interface VideoDetailsForClient {
-  id: string; // Supabaseのvideosテーブルのid (uuid)
+  id: string;
   youtube_video_id: string;
   title?: string | null;
   thumbnail_url?: string | null;
@@ -27,7 +26,6 @@ interface VideoDetailsForClient {
   comment_count?: number | null;
 }
 
-// Supabaseのエラーオブジェクトが持つ可能性のあるプロパティの型
 interface SupabaseErrorDetail {
   message: string;
   details?: string | null;
@@ -35,23 +33,19 @@ interface SupabaseErrorDetail {
   code?: string | null;
 }
 
-// ApiRouteContext インターフェースは削除します
+// ApiRouteContext インターフェースは使用しません
 
 export async function GET(
-  request: NextRequest, // 第一引数
-  // ★★★ 第二引数の型注釈を削除し、構造的部分型付けと型推論に任せる ★★★
-  context: { params?: { youtubeChannelId?: string | string[] | undefined } } // より緩やかな型付けに変更
+  request: NextRequest,
+  // ★★★ 第二引数の params の中の型を any にしてみる ★★★
+  context: { params: { youtubeChannelId: any } }
 ) {
-  // ★★★ context.params から youtubeChannelId を安全に取り出す ★★★
-  const youtubeChannelIdFromParams = context.params?.youtubeChannelId;
+  // ★★★ youtubeChannelId の型を string にアサーション ★★★
+  const youtubeChannelId = context.params.youtubeChannelId as string;
 
-  // youtubeChannelId が文字列であることを確認
-  if (typeof youtubeChannelIdFromParams !== 'string' || !youtubeChannelIdFromParams) {
+  if (!youtubeChannelId || typeof youtubeChannelId !== 'string') { // typeofチェックは残す
     return NextResponse.json({ error: 'YouTube Channel ID is required and must be a string.' }, { status: 400 });
   }
-  // ここで string 型であることが保証される
-  const youtubeChannelId: string = youtubeChannelIdFromParams;
-
 
   try {
     // 1. チャンネル基本情報を取得
