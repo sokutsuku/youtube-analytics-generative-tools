@@ -2,9 +2,9 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-// インターフェース定義は変更なし
+// フロントエンドに返すチャンネル情報の型
 interface ChannelDetailsForClient {
-  id: string;
+  id: string; // Supabaseのchannelsテーブルのid (uuid)
   youtube_channel_id: string;
   title?: string | null;
   description?: string | null;
@@ -15,8 +15,9 @@ interface ChannelDetailsForClient {
   total_view_count?: number | null;
 }
 
+// フロントエンドに返す動画情報の型
 interface VideoDetailsForClient {
-  id: string;
+  id: string; // Supabaseのvideosテーブルのid (uuid)
   youtube_video_id: string;
   title?: string | null;
   thumbnail_url?: string | null;
@@ -26,6 +27,7 @@ interface VideoDetailsForClient {
   comment_count?: number | null;
 }
 
+// Supabaseのエラーオブジェクトが持つ可能性のあるプロパティの型
 interface SupabaseErrorDetail {
   message: string;
   details?: string | null;
@@ -33,22 +35,23 @@ interface SupabaseErrorDetail {
   code?: string | null;
 }
 
-// ApiRouteContext インターフェースは削除しても良い、または以下のようにNext.jsが期待する形に合わせる
-// interface ApiRouteContext {
-//   params: { youtubeChannelId: string };
-// }
+// ApiRouteContext インターフェースは削除します
 
 export async function GET(
-  request: NextRequest,
-  // ★★★ 第二引数の型をNext.jsの標準的な形に ★★★
-  context: { params: { youtubeChannelId: string } }
+  request: NextRequest, // 第一引数
+  // ★★★ 第二引数の型注釈を削除し、構造的部分型付けと型推論に任せる ★★★
+  context: { params?: { youtubeChannelId?: string | string[] | undefined } } // より緩やかな型付けに変更
 ) {
-  const youtubeChannelId = context.params.youtubeChannelId;
-  // ★★★ ここまで修正 ★★★
+  // ★★★ context.params から youtubeChannelId を安全に取り出す ★★★
+  const youtubeChannelIdFromParams = context.params?.youtubeChannelId;
 
-  if (!youtubeChannelId) { // typeof チェックは params の型定義で string が保証されるため不要になることが多い
-    return NextResponse.json({ error: 'YouTube Channel ID is required' }, { status: 400 });
+  // youtubeChannelId が文字列であることを確認
+  if (typeof youtubeChannelIdFromParams !== 'string' || !youtubeChannelIdFromParams) {
+    return NextResponse.json({ error: 'YouTube Channel ID is required and must be a string.' }, { status: 400 });
   }
+  // ここで string 型であることが保証される
+  const youtubeChannelId: string = youtubeChannelIdFromParams;
+
 
   try {
     // 1. チャンネル基本情報を取得
