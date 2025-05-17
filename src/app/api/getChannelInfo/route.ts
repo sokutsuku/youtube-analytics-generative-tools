@@ -1,14 +1,14 @@
 // src/app/api/getChannelInfo/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { google, youtube_v3 } from 'googleapis'; // youtube_v3をインポート
+import { google, youtube_v3 } from 'googleapis';
+import { supabaseAdmin } from '@/lib/supabaseAdmin'; // Supabase管理者クライアントをインポート
 
 const youtube = google.youtube({
   version: 'v3',
   auth: process.env.YOUTUBE_API_KEY,
 });
 
-// チャンネルURLからID、ユーザー名、またはハンドルを抽出する関数
-// (ユーザー提供のコードをベースに、catchブロックの型を修正)
+// extractChannelIdentifier 関数は変更なし (ユーザー様提供の正しいものを想定)
 async function extractChannelIdentifier(url: string): Promise<{ id?: string; forUsername?: string; handle?: string; error?: string }> {
   try {
     const urlObj = new URL(url);
@@ -29,16 +29,15 @@ async function extractChannelIdentifier(url: string): Promise<{ id?: string; for
           const searchResponse = await youtube.search.list({
             part: ['snippet'],
             q: handle,
-            type: ['channel'], // ★★★ 修正: 文字列から文字列の配列へ ★★★
+            type: ['channel'],
             maxResults: 1,
           });
-          // searchResponse.data が存在するか確認
           if (searchResponse && searchResponse.data && searchResponse.data.items && searchResponse.data.items.length > 0 && searchResponse.data.items[0].id?.channelId) {
             return { id: searchResponse.data.items[0].id.channelId };
           } else {
             return { error: `Handle "${handle}" not found or not a channel.` };
           }
-        } catch (searchError: unknown) { // catchのエラー型をunknownに
+        } catch (searchError: unknown) {
           console.error(`Error searching for handle "${handle}":`, searchError);
           if (searchError instanceof Error) {
             return { error: `Error resolving handle "${handle}": ${searchError.message}` };
@@ -53,17 +52,14 @@ async function extractChannelIdentifier(url: string): Promise<{ id?: string; for
           const searchResponse = await youtube.search.list({
             part: ['snippet'],
             q: handle,
-            type: ['channel'], // ★★★ 修正: 文字列から文字列の配列へ ★★★
+            type: ['channel'],
             maxResults: 1,
           });
-          // searchResponse.data が存在するか確認
           if (searchResponse && searchResponse.data && searchResponse.data.items && searchResponse.data.items.length > 0 && searchResponse.data.items[0].id?.channelId) {
             return { id: searchResponse.data.items[0].id.channelId };
           }
-          // ここではエラーを返さず、次のforUsernameのフォールバックがあるため、そのまま進む
-        } catch (searchError: unknown) { // catchのエラー型をunknownに
+        } catch (searchError: unknown) {
             console.error(`Error searching for handle (last part) "${handle}":`, searchError);
-            // エラーがあっても次のforUsernameの処理に進むため、ここではエラーオブジェクトを返さない
         }
       }
       if (pathParts.length > 0) {
@@ -80,40 +76,45 @@ async function extractChannelIdentifier(url: string): Promise<{ id?: string; for
   }
 }
 
-// APIレスポンスの型定義 (変更なし)
-interface ChannelSnippet {
+
+// Supabaseのchannelsテーブルのカラムに合わせた型 (APIレスポンス用とは別に定義)
+interface ChannelDataToSave {
+  youtube_channel_id: string; // 必須
+  title?: string | null;
+  description?: string | null;
+  published_at?: string | null; // timestamptz
+  thumbnail_url?: string | null;
+  country?: string | null;
+  subscriber_count?: number | null; // bigint
+  video_count?: number | null; // bigint
+  total_view_count?: number | null; // bigint
+  uploads_playlist_id?: string | null;
+  custom_url?: string | null;
+  handle?: string | null; // APIから直接ハンドル名が取れるか確認 (customUrlに入ることが多い)
+  last_fetched_at: string; // timestamptz
+  // ユーザー認証導入時に追加するカラム (今回はNULLまたはデフォルト値で対応)
+  user_id?: string | null; // uuid
+  is_public_demo?: boolean; // boolean, default false
+}
+
+// フロントエンドに返す情報の型 (既存のExtractedChannelInfoを流用または調整)
+interface ExtractedChannelInfoForClient {
+  channelId: string; // youtube_channel_id
   title?: string | null;
   description?: string | null;
   publishedAt?: string | null;
-  thumbnails?: {
-    default?: { url?: string | null };
-    medium?: { url?: string | null };
-    high?: { url?: string | null };
-  } | null;
-}
-
-interface ChannelStatistics {
-  subscriberCount?: string | null;
-  videoCount?: string | null;
-  viewCount?: string | null;
-}
-
-interface ExtractedChannelInfo {
-  channelId: string;
-  title?: string | null;
-  description?: string | null;
-  publishedAt?: string | null;
-  subscriberCount?: string | null;
+  subscriberCount?: string | null; // APIからは文字列で来るので、DB保存時に数値化
   videoCount?: string | null;
   thumbnailUrl?: string | null;
   totalViewCount?: string | null;
+  uploadsPlaylistId?: string | null; // 追加: これがないと動画一覧が取れない
 }
+
 
 export async function POST(request: NextRequest) {
   try {
-    // ... (tryブロックの前半は変更なし) ...
     const body = await request.json();
-    const { channelUrl } = body;
+    const { channelUrl, userId, isPublicDemo } = body; // userId と isPublicDemo も受け取れるようにする (任意)
 
     if (!channelUrl || typeof channelUrl !== 'string') {
       return NextResponse.json(
@@ -132,7 +133,7 @@ export async function POST(request: NextRequest) {
     }
 
     const params: youtube_v3.Params$Resource$Channels$List = {
-        part: ['snippet', 'statistics'],
+        part: ['snippet', 'statistics', 'contentDetails', 'brandingSettings'], // contentDetails, brandingSettingsも追加
         ...(identifier.id && { id: [identifier.id] }),
         ...(identifier.forUsername && { forUsername: identifier.forUsername }),
     };
@@ -154,10 +155,51 @@ export async function POST(request: NextRequest) {
     }
 
     const channelData = youtubeResponse.data.items[0];
-    const snippet: ChannelSnippet | undefined | null = channelData.snippet;
-    const statistics: ChannelStatistics | undefined | null = channelData.statistics;
+    const snippet = channelData.snippet;
+    const statistics = channelData.statistics;
+    const contentDetails = channelData.contentDetails;
+    // const brandingSettings = channelData.brandingSettings; // 必要なら使う
 
-    const extractedInfo: ExtractedChannelInfo = {
+    // Supabaseに保存するためのデータ整形
+    const dataToSave: ChannelDataToSave = {
+      youtube_channel_id: channelData.id!, // IDは必須
+      title: snippet?.title,
+      description: snippet?.description,
+      published_at: snippet?.publishedAt,
+      thumbnail_url: snippet?.thumbnails?.high?.url || snippet?.thumbnails?.default?.url,
+      country: snippet?.country,
+      subscriber_count: statistics?.subscriberCount ? parseInt(statistics.subscriberCount, 10) : null,
+      video_count: statistics?.videoCount ? parseInt(statistics.videoCount, 10) : null,
+      total_view_count: statistics?.viewCount ? parseInt(statistics.viewCount, 10) : null,
+      uploads_playlist_id: contentDetails?.relatedPlaylists?.uploads,
+      custom_url: snippet?.customUrl,
+      handle: snippet?.customUrl?.startsWith('@') ? snippet.customUrl : null, // 簡単なハンドル抽出 (要改善)
+      last_fetched_at: new Date().toISOString(),
+      user_id: userId || null, // フロントから渡されたuserId、なければNULL
+      is_public_demo: typeof isPublicDemo === 'boolean' ? isPublicDemo : false, // フロントから渡されたフラグ
+    };
+
+    // SupabaseにUpsert
+    const { data: savedChannel, error: supabaseError } = await supabaseAdmin
+      .from('channels')
+      .upsert(dataToSave, {
+        onConflict: 'youtube_channel_id', // youtube_channel_id がユニークキーである前提
+      })
+      .select() // 保存/更新されたデータを返す
+      .single(); // 1行返ることを期待
+
+    if (supabaseError) {
+      console.error('Supabase error upserting channel info:', supabaseError);
+      return NextResponse.json(
+        { message: 'Error saving channel info to Supabase', error: supabaseError.message },
+        { status: 500 }
+      );
+    }
+
+    console.log('Channel info saved/updated in Supabase:', savedChannel);
+
+    // フロントエンドに返すデータ (APIから取得した生の統計情報も文字列で返す)
+    const extractedInfoForClient: ExtractedChannelInfoForClient = {
       channelId: channelData.id || 'N/A',
       title: snippet?.title,
       description: snippet?.description,
@@ -166,61 +208,31 @@ export async function POST(request: NextRequest) {
       videoCount: statistics?.videoCount,
       thumbnailUrl: snippet?.thumbnails?.high?.url || snippet?.thumbnails?.default?.url,
       totalViewCount: statistics?.viewCount,
+      uploadsPlaylistId: contentDetails?.relatedPlaylists?.uploads, // 追加
     };
 
     return NextResponse.json({
-      message: 'Successfully fetched channel info',
-      data: extractedInfo,
+      message: 'Successfully fetched and saved channel info',
+      data: extractedInfoForClient, // フロントエンド向けのデータを返す
     });
 
   } catch (error: unknown) {
+    // ... (既存の堅牢なエラーハンドリング) ...
     console.error('Error in POST /api/getChannelInfo:', error);
     let errorMessage = 'Failed to fetch channel info.';
-    let errorDetails: unknown = 'Unknown error details'; // 初期値を設定
-
+    let errorDetails: unknown = 'Unknown error details';
     if (error instanceof Error) {
-      errorMessage = error.message; // まずは基本的なエラーメッセージを設定
-      errorDetails = error.stack || error.message; // スタックトレースかメッセージを詳細として設定
-
-      // GaxiosErrorのような構造を持つかチェック (より安全に)
-      // `error` オブジェクトが `response` プロパティを持ち、
-      // その `response` が `data` プロパティを持ち、
-      // さらにその `data` が `error` プロパティを持ち、
-      // その `error` が `message` プロパティを持つか、を段階的に確認
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'response' in error &&
-        error.response !== null &&
-        typeof error.response === 'object' &&
-        'data' in error.response &&
-        error.response.data !== null &&
-        typeof error.response.data === 'object' &&
-        'error' in error.response.data &&
-        error.response.data.error !== null &&
-        typeof error.response.data.error === 'object' &&
-        'message' in error.response.data.error &&
-        typeof error.response.data.error.message === 'string'
-      ) {
-        // 型アサーションの前に十分なチェックを行う
-        const gaxiosSpecificError = error.response.data.error;
-        errorMessage = `Google API Error: ${gaxiosSpecificError.message}`;
-        errorDetails = error.response.data; // response.data全体を詳細として保持
+      errorMessage = error.message;
+      errorDetails = error.stack || error.message;
+      const gaxiosError = error as any;
+      if (gaxiosError.response?.data?.error?.message) {
+        errorMessage = `Google API Error: ${gaxiosError.response.data.error.message}`;
+        errorDetails = gaxiosError.response.data;
       }
     } else {
-      // Errorインスタンスではない場合
       errorMessage = 'An unknown error occurred (not an Error instance).';
-      if (typeof error === 'string') {
-        errorDetails = error;
-      } else {
-        try {
-          errorDetails = JSON.stringify(error);
-        } catch {
-          // stringifyできない場合はそのまま
-        }
-      }
+      errorDetails = String(error);
     }
-
     return NextResponse.json(
       { message: errorMessage, error: errorMessage, details: errorDetails },
       { status: 500 }
