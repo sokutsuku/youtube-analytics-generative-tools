@@ -30,12 +30,12 @@ interface SupabaseErrorDetail {
   code?: string | null;
 }
 
-// ★★★ PageProps インターフェースを削除またはコメントアウトし、Next.jsの型推論に任せる ★★★
-// interface PageProps {
-//   params: {
-//     youtubeChannelId: string;
-//   };
-// }
+// Next.js App RouterのPageProps型を明示的に定義
+type PageProps = {
+  params: {
+    youtubeChannelId: string;
+  };
+};
 
 async function getChannelPageData(youtubeChannelId: string): Promise<{
   channel: ChannelDetailsForClient | null;
@@ -106,17 +106,11 @@ async function getChannelPageData(youtubeChannelId: string): Promise<{
 }
 
 // ★★★ ChannelPage コンポーネントの props の型注釈を変更 ★★★
-export default async function ChannelPage({
-  params,
-}: {
-  params: { youtubeChannelId: string }; // Next.jsが期待する params の型
-  searchParams?: { [key: string]: string | string[] | undefined }; // searchParams も受け取る可能性を考慮
-}) {
-  const youtubeChannelId = params.youtubeChannelId;
-  console.log("ChannelPage received params:", params);
+export default async function ChannelPage(props: PageProps) {
+  const { youtubeChannelId } = props.params;
 
-  if (!youtubeChannelId || typeof youtubeChannelId !== 'string') { // string であることの確認は重要
-      return <div className="container mx-auto p-4 text-red-500">Error: Channel ID not found in params or is not a string.</div>;
+  if (!youtubeChannelId || typeof youtubeChannelId !== 'string') {
+    return <div className="container mx-auto p-4 text-red-500">Error: Channel ID not found in params or is not a string.</div>;
   }
 
   const { channel, videos, error, errorDetails } = await getChannelPageData(youtubeChannelId);
