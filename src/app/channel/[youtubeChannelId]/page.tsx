@@ -1,8 +1,8 @@
-// src/app/api/getChannelDetails/[youtubeChannelId]/route.ts
-import { type NextRequest, NextResponse } from 'next/server';
+// src/app/channel/[youtubeChannelId]/page.tsx
+import ChannelDisplay from '@/compornents/sections/channelDisplay'; // パスを確認してください
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
-// インターフェース定義は変更なし
+// ChannelDetailsForClient, VideoDetailsForClient, SupabaseErrorDetail のインターフェース定義は変更なし
 interface ChannelDetailsForClient {
   id: string;
   youtube_channel_id: string;
@@ -21,9 +21,6 @@ interface VideoDetailsForClient {
   title?: string | null;
   thumbnail_url?: string | null;
   published_at?: string | null;
-  view_count?: number | null;
-  like_count?: number | null;
-  comment_count?: number | null;
 }
 
 interface SupabaseErrorDetail {
@@ -33,105 +30,117 @@ interface SupabaseErrorDetail {
   code?: string | null;
 }
 
-// ★★★ GET関数の第二引数の型を最も標準的な形に戻す ★★★
-export async function GET(
-  request: NextRequest,
-  context: { params: { youtubeChannelId: string } } // これがNext.jsの標準的な型
-) {
-  const youtubeChannelId = context.params.youtubeChannelId;
-  // ★★★ ここまで修正 ★★★
+// ★★★ PageProps インターフェースを削除またはコメントアウトし、Next.jsの型推論に任せる ★★★
+// interface PageProps {
+//   params: {
+//     youtubeChannelId: string;
+//   };
+// }
 
-  // youtubeChannelId が string であることは型で保証されるが、念のためチェック
-  if (!youtubeChannelId || typeof youtubeChannelId !== 'string') {
-    return NextResponse.json({ error: 'YouTube Channel ID is required and must be a string.' }, { status: 400 });
-  }
-
+async function getChannelPageData(youtubeChannelId: string): Promise<{
+  channel: ChannelDetailsForClient | null;
+  videos: VideoDetailsForClient[];
+  error?: string;
+  errorDetails?: SupabaseErrorDetail | string;
+}> {
   try {
-    // 1. チャンネル基本情報を取得
     const { data: channelData, error: channelError } = await supabaseAdmin
       .from('channels')
-      .select(`
-        id,
-        youtube_channel_id,
-        title,
-        description,
-        published_at,
-        thumbnail_url,
-        subscriber_count,
-        video_count,
-        total_view_count
-      `)
+      .select('id, youtube_channel_id, title, description, published_at, thumbnail_url, subscriber_count, video_count, total_view_count')
       .eq('youtube_channel_id', youtubeChannelId)
       .single();
 
     if (channelError) {
-        console.error(`Supabase error fetching channel (youtubeChannelId: ${youtubeChannelId}):`, JSON.stringify(channelError, null, 2));
-        throw channelError;
+      console.error('Supabase error fetching channel (getChannelPageData):', JSON.stringify(channelError, null, 2));
+      throw channelError;
     }
     if (!channelData) {
-      return NextResponse.json({ error: `Channel with ID ${youtubeChannelId} not found` }, { status: 404 });
+      console.error('Channel data not found in DB (getChannelPageData) for youtube_channel_id:', youtubeChannelId);
+      return { channel: null, videos: [], error: `Channel with ID ${youtubeChannelId} not found in our database.` };
     }
 
-    // 2. そのチャンネルの動画一覧を取得
     const { data: videosData, error: videosError } = await supabaseAdmin
       .from('videos')
-      .select(`
-        id,
-        youtube_video_id,
-        title,
-        thumbnail_url,
-        published_at,
-        view_count,
-        like_count,
-        comment_count
-      `)
+      .select('id, youtube_video_id, title, thumbnail_url, published_at') // view_countなどは削除済み
       .eq('channel_id', channelData.id)
       .order('published_at', { ascending: false })
       .limit(50);
 
     if (videosError) {
-        console.error(`Supabase error fetching videos for channel (youtubeChannelId: ${youtubeChannelId}, internalChannelId: ${channelData.id}):`, JSON.stringify(videosError, null, 2));
-        throw videosError;
+      console.error('Supabase error fetching videos (getChannelPageData):', JSON.stringify(videosError, null, 2));
+      throw videosError;
     }
 
-    const responseData: {
-        channel: ChannelDetailsForClient;
-        videos: VideoDetailsForClient[];
-    } = {
-        channel: channelData as ChannelDetailsForClient,
-        videos: (videosData as VideoDetailsForClient[]) || [],
+    return {
+      channel: channelData as ChannelDetailsForClient,
+      videos: (videosData as VideoDetailsForClient[]) || [],
     };
-
-    return NextResponse.json(responseData);
-
   } catch (error: unknown) {
-    console.error(`Error fetching channel details for youtubeChannelId: ${youtubeChannelId}:`, error);
-    let errorMessage = 'Failed to fetch channel details.';
+    console.error('Critical error in getChannelPageData for youtubeChannelId:', youtubeChannelId, error);
+    let errorMessage = 'An unknown error occurred while fetching channel page data.';
     let errorDetailsOutput: SupabaseErrorDetail | string = 'No further details available.';
 
-    if (
-        typeof error === 'object' &&
-        error !== null &&
-        'message' in error &&
-        typeof (error as { message?: unknown }).message === 'string' && // キャストを一部残しつつチェック
-        ('code' in error || 'details' in error || 'hint' in error)
-    ) {
-      const potentialSupabaseError = error as SupabaseErrorDetail;
-      errorMessage = potentialSupabaseError.message;
+    if (typeof error === 'object' && error !== null && 'message' in error) {
+      const potentialSupabaseError = error as Partial<SupabaseErrorDetail>;
+      errorMessage = typeof potentialSupabaseError.message === 'string' ? potentialSupabaseError.message : errorMessage;
       errorDetailsOutput = {
-          message: potentialSupabaseError.message,
+          message: typeof potentialSupabaseError.message === 'string' ? potentialSupabaseError.message : 'Error message not available.',
           details: typeof potentialSupabaseError.details === 'string' ? potentialSupabaseError.details : null,
           hint: typeof potentialSupabaseError.hint === 'string' ? potentialSupabaseError.hint : null,
           code: typeof potentialSupabaseError.code === 'string' ? potentialSupabaseError.code : null,
       };
+      console.error('Formatted Supabase Error (getChannelPageData):', JSON.stringify(errorDetailsOutput, null, 2));
     } else if (error instanceof Error) {
       errorMessage = error.message;
       errorDetailsOutput = error.stack || errorMessage;
+      console.error('JavaScript Error (getChannelPageData):', error);
     } else if (typeof error === 'string') {
       errorMessage = error;
       errorDetailsOutput = error;
+      console.error('String Error (getChannelPageData):', error);
+    } else {
+      console.error('Unknown error type (getChannelPageData):', error);
     }
-
-    return NextResponse.json({ error: errorMessage, details: errorDetailsOutput }, { status: 500 });
+    return { channel: null, videos: [], error: errorMessage, errorDetails: errorDetailsOutput };
   }
+}
+
+// ★★★ ChannelPage コンポーネントの props の型注釈を変更 ★★★
+export default async function ChannelPage({
+  params,
+}: {
+  params: { youtubeChannelId: string }; // Next.jsが期待する params の型
+  searchParams?: { [key: string]: string | string[] | undefined }; // searchParams も受け取る可能性を考慮
+}) {
+  const youtubeChannelId = params.youtubeChannelId;
+  console.log("ChannelPage received params:", params);
+
+  if (!youtubeChannelId || typeof youtubeChannelId !== 'string') { // string であることの確認は重要
+      return <div className="container mx-auto p-4 text-red-500">Error: Channel ID not found in params or is not a string.</div>;
+  }
+
+  const { channel, videos, error, errorDetails } = await getChannelPageData(youtubeChannelId);
+
+  if (error || !channel) {
+    return (
+      <div className="container mx-auto p-6 bg-red-50 border-l-4 border-red-500 text-red-700">
+        <p className="font-bold">Error Loading Channel Data:</p>
+        <p>{error || 'Channel not found or an unexpected error occurred.'}</p>
+        {errorDetails && (
+          <details className="mt-2 text-sm">
+            <summary className="cursor-pointer hover:underline">Error Details</summary>
+            <pre className="mt-1 p-2 bg-red-100 text-red-800 rounded overflow-x-auto whitespace-pre-wrap break-all">
+              {typeof errorDetails === 'string' ? errorDetails : JSON.stringify(errorDetails, null, 2)}
+            </pre>
+          </details>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto p-4">
+      <ChannelDisplay initialChannel={channel} initialVideos={videos} />
+    </div>
+  );
 }
