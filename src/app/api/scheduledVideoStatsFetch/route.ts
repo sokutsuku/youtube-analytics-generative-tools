@@ -17,7 +17,7 @@ interface VideoStatsLogToSave {
   comment_count?: number | null;
 }
 
-export async function GET(request: NextRequest) { // request引数をNextRequest型で受け取る
+export async function GET(request: NextRequest) {
   try {
     const currentTime = new Date();
     console.log(`[${currentTime.toISOString()}] Scheduled video stats fetch job started. Triggered by: ${request.url}`);
@@ -40,13 +40,10 @@ export async function GET(request: NextRequest) { // request引数をNextRequest
     console.log(`Found ${videosToUpdate.length} videos to update stats.`);
     const videoIdsToFetch = videosToUpdate.map(v => v.youtube_video_id);
     const videoStatsLogsToInsert: VideoStatsLogToSave[] = [];
-    const videoScheduleUpdates: Array<{
+    const videoScheduleUpdates: Array<{ // videosテーブル更新用 (統計情報は含まない)
       id: string;
       next_stat_fetch_at: string;
       last_stat_logged_at: string;
-      view_count?: number | null;
-      like_count?: number | null;
-      comment_count?: number | null;
       stat_fetch_frequency_hours?: number | null;
     }> = [];
 
@@ -54,7 +51,7 @@ export async function GET(request: NextRequest) { // request引数をNextRequest
       const batchVideoIds = videoIdsToFetch.slice(i, i + 50);
       const videosDetailsResponse: GaxiosResponse<youtube_v3.Schema$VideoListResponse> =
         await youtube.videos.list({
-          part: ['statistics'],
+          part: ['statistics'], // 統計情報のみ取得
           id: batchVideoIds,
         });
 
@@ -75,23 +72,23 @@ export async function GET(request: NextRequest) { // request引数をNextRequest
             const publishedDate = new Date(correspondingVideoInDb.published_at || 0);
             const hoursSincePublished = (currentTime.getTime() - publishedDate.getTime()) / (1000 * 60 * 60);
             
-            let nextFetchFrequencyHours = 24;
+            let nextFetchFrequencyHours = 24; // デフォルト24時間
             if (hoursSincePublished <= 24) {
               nextFetchFrequencyHours = 1;
             } else if (hoursSincePublished <= 72) {
               nextFetchFrequencyHours = 3;
             }
+            // テスト用に固定のインターバルにする場合はここで設定
+            // nextFetchFrequencyHours = 0.5; // 30分
 
             const nextFetchTime = new Date(currentTime.getTime() + nextFetchFrequencyHours * 60 * 60 * 1000);
 
             videoScheduleUpdates.push({
               id: correspondingVideoInDb.id,
-              last_stat_logged_at: fetchedAtISO,
+              last_stat_logged_at: fetchedAtISO, // videosテーブルの最終ログ記録日時を更新
               next_stat_fetch_at: nextFetchTime.toISOString(),
               stat_fetch_frequency_hours: nextFetchFrequencyHours,
-              view_count: videoData.statistics.viewCount ? parseInt(videoData.statistics.viewCount, 10) : null,
-              like_count: videoData.statistics.likeCount ? parseInt(videoData.statistics.likeCount, 10) : null,
-              comment_count: videoData.statistics.commentCount ? parseInt(videoData.statistics.commentCount, 10) : null,
+              // ★★★ view_count, like_count, comment_count を削除 ★★★
             });
           }
         }
@@ -113,13 +110,10 @@ export async function GET(request: NextRequest) { // request引数をNextRequest
       for (const update of videoScheduleUpdates) {
         const { error: scheduleUpdateError } = await supabaseAdmin
           .from('videos')
-          .update({
+          .update({ // ★★★ ここから view_count, like_count, comment_count を削除 ★★★
             last_stat_logged_at: update.last_stat_logged_at,
             next_stat_fetch_at: update.next_stat_fetch_at,
             stat_fetch_frequency_hours: update.stat_fetch_frequency_hours,
-            view_count: update.view_count,
-            like_count: update.like_count,
-            comment_count: update.comment_count,
           })
           .eq('id', update.id);
         if (scheduleUpdateError) {
@@ -138,5 +132,5 @@ export async function GET(request: NextRequest) { // request引数をNextRequest
   }
 }
 
-// ★★★ GET_metadata 関数をこのファイルから削除 ★★★
+// GET_metadata 関数は変更なし (もしあれば)
 // export async function GET_metadata(request: NextRequest) { ... }
