@@ -25,7 +25,7 @@ interface VideoStatsLogToSave {
 //   // ...
 // }
 
-export async function GET(_request: NextRequest) { // _request は使用しないことを明示 (ESLint設定で無視されることを期待)
+export async function GET() {
   try {
     const currentTime = new Date();
     console.log(`[${currentTime.toISOString()}] Scheduled video stats fetch job started.`);
@@ -149,10 +149,11 @@ export async function GET(_request: NextRequest) { // _request は使用しな�
   }
 }
 
-export async function GET_metadata(_request: NextRequest) { // ★★★ _request は使用しないことを明示 (型は残す) ★★★
-    console.log("Scheduled video metadata update job started (placeholder).");
-    // TODO: videosテーブルの last_metadata_fetched_at を見て、1日以上経過した動画の
-    // snippet, contentDetails を youtube.videos.list で取得し、
-    // videos テーブルを更新するロジックを実装する
-    return NextResponse.json({ message: "Metadata update job placeholder." });
+// 未使用引数を削除
+export async function GET_metadata() {
+  console.log("Scheduled video metadata update job started (placeholder).");
+  // TODO: videosテーブルの last_metadata_fetched_at を見て、1日以上経過した動画の
+  // snippet, contentDetails を youtube.videos.list で取得し、
+  // videos テーブルを更新するロジックを実装する
+  return NextResponse.json({ message: "Metadata update job placeholder." });
 }
