@@ -56,23 +56,21 @@ export async function POST(request: NextRequest) {
     let nextPageToken: string | undefined | null = undefined;
 
     do {
-      // ★★★ ここから修正 ★★★
-      const response: GaxiosResponse<youtube_v3.Schema$PlaylistItemListResponse> = // 型注釈を追加
-        await youtube.playlistItems.list({
-      // ★★★ ここまで修正 ★★★
-        part: ['snippet', 'contentDetails'],
-        playlistId: uploadsPlaylistId,
-        maxResults: 50,
-        pageToken: nextPageToken || undefined,
-      });
+        const playlistItemsResponse: GaxiosResponse<youtube_v3.Schema$PlaylistItemListResponse> =
+            await youtube.playlistItems.list({
+            part: ['snippet', 'contentDetails'],
+            playlistId: uploadsPlaylistId,
+            maxResults: 50,
+            pageToken: nextPageToken || undefined,
+            });
 
-      const playlistItemsData = response.data; // response.data は Schema$PlaylistItemListResponse | undefined | null 型
+        const playlistItemsData = playlistItemsResponse.data;
 
-      if (playlistItemsData && playlistItemsData.items) {
-        allVideoItems = allVideoItems.concat(playlistItemsData.items);
-      }
-      nextPageToken = playlistItemsData?.nextPageToken;
-    } while (nextPageToken);
+        if (playlistItemsData && playlistItemsData.items) {
+            allVideoItems = allVideoItems.concat(playlistItemsData.items);
+        }
+        nextPageToken = playlistItemsData?.nextPageToken;
+        } while (nextPageToken);
 
     if (allVideoItems.length === 0) {
       return NextResponse.json({ message: 'No videos found in the channel playlist.', data: [] });
