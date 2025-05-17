@@ -26,9 +26,12 @@ export async function GET(request: NextRequest) {
       .eq('video_id', supabaseVideoId)
       .order('fetched_at', { ascending: true });
 
-    if (statsLogError) throw statsLogError;
+    if (statsLogError) {
+      console.error('Supabase error fetching video stats log:', statsLogError);
+      return NextResponse.json({ error: 'Failed to fetch video stats log', details: statsLogError.message }, { status: 500 });
+    }
 
-    return NextResponse.json(statsLogData as VideoStatLog[] || []);
+    return NextResponse.json((statsLogData as VideoStatLog[]) || []);
   } catch (error: unknown) {
     console.error('Error fetching video stats log:', error);
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
