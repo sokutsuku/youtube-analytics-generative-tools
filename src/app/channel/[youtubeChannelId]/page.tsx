@@ -25,12 +25,6 @@ interface VideoDetailsForClient {
   // view_count, like_count, comment_count は AccordionItem で別途取得・表示
 }
 
-interface PageProps {
-  params: {
-    youtubeChannelId: string;
-  };
-}
-
 // Supabaseのエラーオブジェクトが持つ可能性のあるプロパティの型
 interface SupabaseErrorDetail {
   message: string;
@@ -38,6 +32,13 @@ interface SupabaseErrorDetail {
   hint?: string | null;
   code?: string | null;
 }
+
+// Next.js App RouterのPageProps型を明示的に定義
+type PageProps = {
+  params: {
+    youtubeChannelId: string;
+  };
+};
 
 async function getChannelPageData(youtubeChannelId: string): Promise<{
   channel: ChannelDetailsForClient | null;
