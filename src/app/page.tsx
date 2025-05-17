@@ -2,26 +2,28 @@
 'use client';
 
 import { useState, FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
 
-// --- 動画情報関連の型定義 (既存) ---
-interface VideoInfo { // これは単一動画の詳細用なので、一覧表示用には調整が必要かも
+// --- 型定義 ---
+interface VideoInfo {
   youtube_video_id: string;
   title?: string | null;
   description?: string | null;
   thumbnail_url?: string | null;
-  // 必要に応じて再生回数なども追加
-  viewCount?: string | null;
+  viewCount?: string | null; // APIから直接来るのは文字列の場合がある
+  likeCount?: string | null;
+  commentCount?: string | null;
+  publishedAt?: string | null;
 }
 
-interface VideoApiResponse { // 単一動画取得APIのレスポンス
+interface VideoApiResponse {
   message: string;
   data?: VideoInfo;
   error?: string;
 }
 
-// --- チャンネル情報関連の型定義 (既存) ---
 interface ChannelInfo {
-  channelId: string; // これは youtube_channel_id に相当
+  channelId: string; // youtube_channel_id
   title?: string | null;
   description?: string | null;
   publishedAt?: string | null;
@@ -29,57 +31,78 @@ interface ChannelInfo {
   videoCount?: string | null;
   thumbnailUrl?: string | null;
   totalViewCount?: string | null;
+  uploadsPlaylistId?: string | null;
 }
 
-interface ChannelApiResponse { // チャンネル情報取得APIのレスポンス
+interface ChannelApiResponse {
   message: string;
   data?: ChannelInfo;
   error?: string;
 }
 
-// --- チャンネルの動画リストAPIのレスポンスデータ型 (新規) ---
-// API側 (/api/getChannelVideos) のレスポンスの data 配列の要素の型
 interface ChannelVideoListItem {
   youtube_video_id: string;
   title?: string | null;
   thumbnail_url?: string | null;
-  // 必要なら他の情報も
+  view_count?: string | null;
+  like_count?: string | null;
+  comment_count?: string | null;
 }
 
 interface ChannelVideosApiResponse {
   message: string;
-  data?: ChannelVideoListItem[]; // 動画リスト
+  data?: ChannelVideoListItem[];
   error?: string;
 }
 
+// ヘルパー関数 (ファイルスコープまたはutilsからインポート)
+const formatDate = (isoDateString?: string | null): string => {
+  if (!isoDateString) return 'N/A';
+  try {
+    return new Date(isoDateString).toLocaleDateString('ja-JP', {
+      year: 'numeric', month: 'long', day: 'numeric'
+    });
+  } catch (_error) {
+    console.error("Error formatting date:", isoDateString, _error);
+    return 'Invalid Date';
+  }
+};
+
+const formatCount = (count?: string | null | number): string => {
+  if (count == null) return 'N/A';
+  const num = typeof count === 'string' ? parseInt(count, 10) : count;
+  if (isNaN(num)) return 'N/A';
+  if (num >= 100000000) return (num / 100000000).toFixed(1).replace(/\.0$/, '') + '億';
+  if (num >= 10000) return (num / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+  return num.toLocaleString();
+};
+
 
 export default function HomePage() {
-  // --- 動画情報関連のState (既存) ---
+  const router = useRouter();
+
   const [youtubeVideoUrl, setYoutubeVideoUrl] = useState<string>('');
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [isFetchingVideo, setIsFetchingVideo] = useState<boolean>(false);
   const [videoFetchError, setVideoFetchError] = useState<string>('');
 
-  // --- チャンネル情報関連のState (既存) ---
   const [youtubeChannelUrl, setYoutubeChannelUrl] = useState<string>('');
   const [channelInfo, setChannelInfo] = useState<ChannelInfo | null>(null);
   const [isFetchingChannel, setIsFetchingChannel] = useState<boolean>(false);
   const [channelFetchError, setChannelFetchError] = useState<string>('');
 
-  // --- チャンネルの動画リスト関連のState (新規) ---
   const [channelVideos, setChannelVideos] = useState<ChannelVideoListItem[] | null>(null);
   const [isFetchingChannelVideos, setIsFetchingChannelVideos] = useState<boolean>(false);
   const [channelVideosError, setChannelVideosError] = useState<string>('');
 
+  const [channelUrlForAnalysisPage, setChannelUrlForAnalysisPage] = useState<string>('');
+  const [navigationError, setNavigationError] = useState<string>('');
 
-  // --- 動画情報取得処理 (既存) ---
   const handleVideoSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    // ... (既存のコードは変更なし) ...
     event.preventDefault();
     setIsFetchingVideo(true);
     setVideoFetchError('');
     setVideoInfo(null);
-
     try {
       const response = await fetch('/api/getVideoInfo', {
         method: 'POST',
@@ -102,17 +125,16 @@ export default function HomePage() {
     }
   };
 
-  // --- チャンネルの動画リストを取得する関数 (新規) ---
   const fetchChannelVideos = async (youtubeChannelId: string) => {
     if (!youtubeChannelId) return;
     setIsFetchingChannelVideos(true);
     setChannelVideosError('');
-    setChannelVideos(null); // 前回のをクリア
+    setChannelVideos(null);
     try {
       const response = await fetch('/api/getChannelVideos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ youtubeChannelId }), // API側で受け取るキー名に合わせる
+        body: JSON.stringify({ youtubeChannelId }),
       });
       const result: ChannelVideosApiResponse = await response.json();
       if (!response.ok || result.error) {
@@ -130,15 +152,13 @@ export default function HomePage() {
     }
   };
 
-  // --- チャンネル情報取得処理 (動画リスト取得の呼び出しを追加) ---
   const handleChannelSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsFetchingChannel(true);
     setChannelFetchError('');
     setChannelInfo(null);
-    setChannelVideos(null); // チャンネル情報取得時に動画リストもクリア
+    setChannelVideos(null);
     setChannelVideosError('');
-
     try {
       const response = await fetch('/api/getChannelInfo', {
         method: 'POST',
@@ -150,7 +170,6 @@ export default function HomePage() {
         throw new Error(result.error || `An error occurred: ${response.statusText}`);
       }
       setChannelInfo(result.data || null);
-      // チャンネル情報取得に成功したら、そのチャンネルの動画リストも取得開始
       if (result.data?.channelId) {
         await fetchChannelVideos(result.data.channelId);
       }
@@ -165,37 +184,149 @@ export default function HomePage() {
     }
   };
 
-  // --- (formatDate, formatCount 関数は変更なし) ---
-  const formatDate = (isoDateString?: string | null) => {
-    if (!isoDateString) return 'N/A';
+  const handleGoToChannelAnalysisPage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setNavigationError('');
+    setIsFetchingChannel(true); // 既存のローディング状態を流用
+
+    if (!channelUrlForAnalysisPage) {
+      setNavigationError('チャンネルURLを入力してください。');
+      setIsFetchingChannel(false);
+      return;
+    }
+
     try {
-      return new Date(isoDateString).toLocaleDateString('ja-JP', {
-        year: 'numeric', month: 'long', day: 'numeric'
+      const response = await fetch('/api/getChannelInfo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelUrl: channelUrlForAnalysisPage }),
       });
-    } catch {
-      return 'Invalid Date';
+      const result = await response.json(); // 型はAPIレスポンスの構造に合わせる
+
+      if (!response.ok) {
+        const errorMessage = (result as ChannelApiResponse)?.error || (result as ChannelApiResponse)?.message || `チャンネル情報の取得に失敗しました。ステータス: ${response.status}`;
+        throw new Error(errorMessage);
+      }
+
+      const successResult = result as ChannelApiResponse;
+      if (successResult.data && typeof successResult.data.channelId === 'string') {
+        router.push(`/channel/${successResult.data.channelId}`);
+      } else {
+        console.error('API response success, but data or channelId is missing or invalid:', result);
+        throw new Error('チャンネルIDの取得に失敗しました (APIレスポンス形式不正)。');
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setNavigationError(`エラー: ${err.message}`);
+      } else {
+        setNavigationError('チャンネル分析ページへの遷移中に不明なエラーが発生しました。');
+      }
+    } finally {
+        setIsFetchingChannel(false);
     }
   };
-
-  const formatCount = (countStr?: string | null) => {
-    if (!countStr) return 'N/A';
-    const count = parseInt(countStr, 10);
-    if (isNaN(count)) return 'N/A';
-    if (count >= 100000000) {
-        return (count / 100000000).toFixed(1).replace(/\.0$/, '') + '億';
-    }
-    if (count >= 10000) {
-        return (count / 10000).toFixed(1).replace(/\.0$/, '') + '万';
-    }
-    return count.toLocaleString();
-  };
-
 
   return (
-    <main className="min-h-screen bg-gray-100 flex flex-col items-center p-4 space-y-12">
-      {/* --- 動画情報取得セクション (既存のまま) --- */}
+    <main className="min-h-screen bg-gray-100 flex flex-col items-center p-4 space-y-12 mb-12">
+      {/* --- 新しいセクション: チャンネル分析ページへ遷移 --- */}
       <section className="bg-white shadow-xl rounded-lg p-6 md:p-8 w-full max-w-2xl">
-        {/* ... (既存の動画情報ゲッターUIは変更なし) ... */}
+        <h1 className="text-2xl md:text-3xl font-bold text-teal-700 mb-8 text-center">
+          チャンネル分析ページへ
+        </h1>
+        <form onSubmit={handleGoToChannelAnalysisPage} className="space-y-6">
+          <div>
+            <label htmlFor="channelUrlForAnalysis" className="block text-sm font-medium text-gray-700 mb-1">
+              分析したいYouTubeチャンネルのURL:
+            </label>
+            <input
+              type="url"
+              id="channelUrlForAnalysis"
+              name="channelUrlForAnalysis"
+              value={channelUrlForAnalysisPage}
+              onChange={(e) => setChannelUrlForAnalysisPage(e.target.value)}
+              placeholder="例: www.youtube.com/@YourFavoriteChannel"
+              required
+              className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm transition-shadow"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isFetchingChannel}
+            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 disabled:bg-gray-400"
+          >
+            {isFetchingChannel ? '準備中...' : '分析ページを見る'}
+          </button>
+        </form>
+        {navigationError && (
+          <p className="mt-4 text-sm text-red-600 text-center">{navigationError}</p>
+        )}
+        <p className="mt-4 text-xs text-gray-500 text-center">
+          入力されたチャンネルの情報がまだデータベースにない場合は、まず情報が収集・保存されます。
+        </p>
+      </section>
+
+      {/* --- チャンネル情報 & 動画リスト取得セクション --- */}
+      <section className="bg-white shadow-xl rounded-lg p-6 md:p-8 w-full max-w-2xl">
+        <h1 className="text-2xl md:text-3xl font-bold text-sky-800 mb-8 text-center">
+          YouTube チャンネル情報 & 動画リストゲッター (現在のページで表示)
+        </h1>
+        <form onSubmit={handleChannelSubmit} className="space-y-6">
+          <div>
+            <label htmlFor="youtubeChannelUrl" className="block text-sm font-medium text-gray-700 mb-1">
+              YouTube チャンネル URL:
+            </label>
+            <input
+              type="url" id="youtubeChannelUrl" name="youtubeChannelUrl"
+              value={youtubeChannelUrl} onChange={(e) => setYoutubeChannelUrl(e.target.value)}
+              placeholder="例: www.youtube.com/@YourFavoriteChannel" required
+              className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm transition-shadow duration-150 ease-in-out hover:shadow-md"
+            />
+          </div>
+          <button type="submit" disabled={isFetchingChannel || isFetchingChannelVideos}
+            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-sky-600 hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors duration-150 ease-in-out">
+            {(isFetchingChannel || isFetchingChannelVideos) ? '情報を取得中...' : 'チャンネル情報と動画リストを取得 (このページ)'}
+          </button>
+        </form>
+        {channelFetchError && (
+          <div role="alert" className="mt-6 bg-red-50 border-l-4 border-red-400 text-red-700 p-4 rounded-md">
+            <p className="font-bold">エラー (チャンネル情報):</p><p>{channelFetchError}</p>
+          </div>
+        )}
+        {channelInfo && (
+          <div className="mt-8 p-4 border border-gray-200 rounded-lg bg-gray-50">
+            <h2 className="text-xl font-semibold mb-2">{channelInfo.title || 'チャンネル名なし'}</h2>
+            {/* 他のチャンネル情報を表示 */}
+            <p className="text-sm">登録者数: {formatCount(channelInfo.subscriberCount)}</p>
+            <p className="text-sm">動画数: {formatCount(channelInfo.videoCount)}</p>
+            <p className="text-sm">総再生回数: {formatCount(channelInfo.totalViewCount)}</p>
+          </div>
+        )}
+        {isFetchingChannelVideos && <p className="mt-4 text-center text-gray-500">動画リストを取得中...</p>}
+        {channelVideosError && (
+          <div role="alert" className="mt-4 bg-red-100 border-l-4 border-red-500 text-red-700 p-3">
+            <p className="font-bold">エラー (動画リスト):</p><p>{channelVideosError}</p>
+          </div>
+        )}
+        {channelVideos && channelVideos.length > 0 && (
+          <div className="mt-4">
+            <h3 className="text-lg font-medium text-gray-700 mb-2">動画リスト:</h3>
+            <ul className="space-y-2 max-h-80 overflow-y-auto">
+              {channelVideos.map(video => (
+                <li key={video.youtube_video_id} className="p-2 border rounded-md bg-white flex items-center space-x-2">
+                  {video.thumbnail_url && <img src={video.thumbnail_url} alt={video.title || ''} className="w-16 h-9 object-cover rounded"/>}
+                  <span className="text-sm text-gray-800 truncate">{video.title || 'タイトルなし'}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {channelVideos && channelVideos.length === 0 && !isFetchingChannelVideos && (
+            <p className="mt-4 text-gray-500">このチャンネルの動画は見つかりませんでした。</p>
+        )}
+      </section>
+
+      {/* --- 動画情報取得セクション --- */}
+      <section className="bg-white shadow-xl rounded-lg p-6 md:p-8 w-full max-w-2xl">
         <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-8 text-center">
           YouTube 動画情報ゲッター
         </h1>
@@ -208,105 +339,20 @@ export default function HomePage() {
               type="url" id="youtubeVideoUrl" name="youtubeVideoUrl"
               value={youtubeVideoUrl} onChange={(e) => setYoutubeVideoUrl(e.target.value)}
               placeholder="例: https://www.youtube.com/watch?v=dQw4w9WgXcQ" required
-              className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow duration-150 ease-in-out hover:shadow-md"
+              className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow"
             />
           </div>
           <button type="submit" disabled={isFetchingVideo}
-            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors duration-150 ease-in-out">
+            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-gray-400">
             {isFetchingVideo ? '動画情報を取得中...' : '動画情報を取得'}
           </button>
         </form>
         {videoFetchError && <div role="alert" className="mt-6 bg-red-50 border-l-4 border-red-400 text-red-700 p-4 rounded-md"><p className="font-bold">エラー</p><p>{videoFetchError}</p></div>}
         {videoInfo && (
-          <div className="mt-8 p-6 border border-gray-200 rounded-lg bg-gray-50 shadow">
-            <h2 className="text-xl md:text-2xl font-semibold text-gray-800 mb-4 break-words">{videoInfo.title || 'タイトルなし'}</h2>
-            {videoInfo.thumbnail_url && <img src={videoInfo.thumbnail_url} alt={videoInfo.title || ''} className="w-full max-w-md mx-auto h-auto rounded-lg mb-4 shadow-lg"/>}
-            <p className="text-xs text-gray-600 mb-1 break-all"><strong>動画ID:</strong> {videoInfo.youtube_video_id}</p>
-          </div>
-        )}
-      </section>
-
-      {/* --- チャンネル情報 & 動画リスト取得セクション --- */}
-      <section className="bg-white shadow-xl rounded-lg p-6 md:p-8 w-full max-w-2xl">
-        <h1 className="text-2xl md:text-3xl font-bold text-sky-800 mb-8 text-center">
-          YouTube チャンネル情報 & 動画リストゲッター
-        </h1>
-        <form onSubmit={handleChannelSubmit} className="space-y-6">
-          <div>
-            <label htmlFor="youtubeChannelUrl" className="block text-sm font-medium text-gray-700 mb-1">
-              YouTube チャンネル URL:
-            </label>
-            <input
-              type="url" id="youtubeChannelUrl" name="youtubeChannelUrl"
-              value={youtubeChannelUrl} onChange={(e) => setYoutubeChannelUrl(e.target.value)}
-              placeholder="例: www.youtube.com0/@YourFavoriteChannel" required
-              className="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-500 focus:border-sky-500 sm:text-sm transition-shadow duration-150 ease-in-out hover:shadow-md"
-            />
-          </div>
-          <button type="submit" disabled={isFetchingChannel || isFetchingChannelVideos} // チャンネル情報取得中または動画リスト取得中は無効
-            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-sky-600 hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors duration-150 ease-in-out">
-            {(isFetchingChannel || isFetchingChannelVideos) ? '情報を取得中...' : 'チャンネル情報と動画リストを取得'}
-          </button>
-        </form>
-
-        {channelFetchError && (
-          <div role="alert" className="mt-6 bg-red-50 border-l-4 border-red-400 text-red-700 p-4 rounded-md">
-            <p className="font-bold">エラー (チャンネル情報):</p>
-            <p>{channelFetchError}</p>
-          </div>
-        )}
-
-        {channelInfo && (
-          <div className="mt-8 p-6 border border-gray-200 rounded-lg bg-gray-50 shadow">
-            {/* ... (既存のチャンネル情報表示部分は変更なし) ... */}
-            <div className="flex items-center mb-4">
-                {channelInfo.thumbnailUrl && (
-                    <img src={channelInfo.thumbnailUrl} alt={channelInfo.title || ''} className="w-20 h-20 rounded-full mr-4 shadow-md"/>
-                )}
-                <h2 className="text-xl md:text-2xl font-semibold text-gray-800 break-words">
-                    {channelInfo.title || 'チャンネル名なし'}
-                </h2>
-            </div>
-            <div className="space-y-3">
-              <p><strong className="font-medium text-gray-700">チャンネル概要:</strong> <span className="text-sm text-gray-600 whitespace-pre-wrap break-words block mt-1 max-h-32 overflow-y-auto border p-2 rounded-md bg-white">{channelInfo.description || 'N/A'}</span></p>
-              <p><strong className="font-medium text-gray-700">チャンネル登録者数:</strong> <span className="text-gray-600">{formatCount(channelInfo.subscriberCount)}</span></p>
-              <p><strong className="font-medium text-gray-700">総動画数:</strong> <span className="text-gray-600">{formatCount(channelInfo.videoCount)}</span></p>
-              <p><strong className="font-medium text-gray-700">チャンネル総再生回数:</strong> <span className="text-gray-600">{formatCount(channelInfo.totalViewCount)}</span></p>
-              <p><strong className="font-medium text-gray-700">チャンネル開設日 (初回投稿日目安):</strong> <span className="text-gray-600">{formatDate(channelInfo.publishedAt)}</span></p>
-              <p className="text-xs text-gray-500"><strong className="font-medium">チャンネルID:</strong> <span className="break-all">{channelInfo.channelId}</span></p>
-            </div>
-
-            {/* --- 動画リスト表示 (新規追加) --- */}
-            {isFetchingChannelVideos && <p className="mt-6 text-center text-gray-500">動画リストを取得中...</p>}
-            {channelVideosError && (
-              <div role="alert" className="mt-6 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md">
-                <p className="font-bold">エラー (動画リスト):</p>
-                <p>{channelVideosError}</p>
-              </div>
-            )}
-            {channelVideos && channelVideos.length > 0 && (
-              <div className="mt-6 pt-6 border-t border-gray-300">
-                <h3 className="text-lg font-semibold text-gray-700 mb-3">取得した動画 ({channelVideos.length}件)</h3>
-                <ul className="space-y-3 max-h-96 overflow-y-auto pr-2">
-                  {channelVideos.map((video) => (
-                    <li key={video.youtube_video_id} className="p-3 bg-white rounded-md shadow-sm flex items-start space-x-3 hover:bg-gray-50 transition-colors">
-                      {video.thumbnail_url && (
-                        <img src={video.thumbnail_url} alt={video.title || ''} className="w-20 h-auto rounded object-cover flex-shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-sky-700 truncate" title={video.title || ''}>{video.title || 'タイトルなし'}</p>
-                        <p className="text-xs text-gray-500">ID: {video.youtube_video_id}</p>
-                        {/* 必要に応じてここに再生回数なども表示できますが、
-                            ChannelVideoListItem 型定義とAPIレスポンスに含める必要があります */}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {channelVideos && channelVideos.length === 0 && !isFetchingChannelVideos && (
-              <p className="mt-6 text-center text-gray-500">このチャンネルの動画は見つかりませんでした、またはまだ取得されていません。</p>
-            )}
+          <div className="mt-8 p-4 border border-gray-200 rounded-lg bg-gray-50">
+            <h2 className="text-xl font-semibold mb-2">{videoInfo.title || 'タイトルなし'}</h2>
+            {videoInfo.thumbnail_url && <img src={videoInfo.thumbnail_url} alt={videoInfo.title || ''} className="w-full max-w-md mx-auto h-auto rounded-lg mb-3"/>}
+            <p className="text-xs text-gray-600">動画ID: {videoInfo.youtube_video_id}</p>
           </div>
         )}
       </section>
