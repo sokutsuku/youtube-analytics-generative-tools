@@ -112,7 +112,12 @@ async function getChannelPageData(youtubeChannelId: string): Promise<{
 
 
 export default async function ChannelPage({ params }: PageProps) {
-  const { youtubeChannelId } = params;
+
+  const youtubeChannelId = params.youtubeChannelId;
+  console.log("ChannelPage received params:", params);
+  if (!youtubeChannelId) {
+      return <div className="container mx-auto p-4 text-red-500">Error: Channel ID not found in params.</div>;
+  }
   const { channel, videos, error, errorDetails } = await getChannelPageData(youtubeChannelId);
 
   if (error || !channel) {
