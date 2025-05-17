@@ -17,7 +17,7 @@ interface VideoStatsLogToSave {
   comment_count?: number | null;
 }
 
-export async function GET() {
+async function GET() {
   try {
     const currentTime = new Date();
     console.log(`[${currentTime.toISOString()}] Scheduled video stats fetch job started.`);
@@ -138,8 +138,5 @@ export async function GET() {
   }
 }
 
-// 未使用引数を削除
-export async function GET_metadata() {
-  console.log("Scheduled video metadata update job started (placeholder).");
-  return NextResponse.json({ message: "Metadata update job placeholder." });
-}
+// デフォルトエクスポートとしてGETをエクスポート
+export default GET;
