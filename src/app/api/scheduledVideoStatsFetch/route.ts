@@ -3,19 +3,20 @@ import { NextResponse } from 'next/server';
 import { google, youtube_v3 } from 'googleapis';
 import type { GaxiosResponse } from 'gaxios';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
-import type { NextRequest } from 'next/server'; // NextRequest をインポート
+import type { NextRequest } from 'next/server';
 
 const youtube = google.youtube({
   version: 'v3',
   auth: process.env.YOUTUBE_API_KEY,
 });
 
-interface VideoForStatUpdate {
-  id: string; // Supabaseのvideosテーブルのid (uuid)
-  youtube_video_id: string;
-  published_at?: string | null; // ユーザー定義の取得頻度ロジックに必要なら
-  stat_fetch_frequency_hours?: number | null; // もし頻度をDBで管理する場合
-}
+// ★★★ VideoForStatUpdate インターフェースを削除 ★★★
+// interface VideoForStatUpdate {
+//   id: string;
+//   youtube_video_id: string;
+//   published_at?: string | null;
+//   stat_fetch_frequency_hours?: number | null;
+// }
 
 interface VideoStatsLogToSave {
   video_id: string;
@@ -25,28 +26,25 @@ interface VideoStatsLogToSave {
   comment_count?: number | null;
 }
 
-// 次の正時または30分を計算するヘルパー関数
 function getNextScheduledFetchTime(now: Date): Date {
   const currentMinutes = now.getMinutes();
   const scheduledTime = new Date(now.getTime());
-
   if (currentMinutes < 30) {
-    scheduledTime.setMinutes(30, 0, 0); // 次の30分
+    scheduledTime.setMinutes(30, 0, 0);
   } else {
-    scheduledTime.setHours(now.getHours() + 1, 0, 0, 0); // 次の正時
+    scheduledTime.setHours(now.getHours() + 1, 0, 0, 0);
   }
   return scheduledTime;
 }
 
-// ★★★ request を _request に修正 ★★★
-export async function GET(_request: NextRequest) { // Cron JobからはGETリクエストで呼び出されることが多い
+export async function GET(_request: NextRequest) { // ★★★ _request は使用しないことを明示 (型は残す) ★★★
   try {
     const currentTime = new Date();
     console.log(`[${currentTime.toISOString()}] Scheduled video stats fetch job started.`);
 
     const { data: videosToUpdate, error: fetchError } = await supabaseAdmin
       .from('videos')
-      .select('id, youtube_video_id, published_at, stat_fetch_frequency_hours')
+      .select('id, youtube_video_id, published_at, stat_fetch_frequency_hours') // stat_fetch_frequency_hoursも取得
       .lte('next_stat_fetch_at', currentTime.toISOString());
 
     if (fetchError) {
@@ -62,14 +60,22 @@ export async function GET(_request: NextRequest) { // Cron JobからはGETリク
     console.log(`Found ${videosToUpdate.length} videos to update stats.`);
     const videoIdsToFetch = videosToUpdate.map(v => v.youtube_video_id);
     const videoStatsLogsToInsert: VideoStatsLogToSave[] = [];
-    // videoScheduleUpdates の型定義から Partial<VideoForStatUpdate> を削除。id は必須。
-    const videoScheduleUpdates: Array<{ id: string, next_stat_fetch_at: string, last_stat_logged_at: string, view_count?: number | null, like_count?: number | null, comment_count?: number | null }> = [];
+    // videoScheduleUpdates の型を具体的に定義
+    const videoScheduleUpdates: Array<{
+      id: string;
+      next_stat_fetch_at: string;
+      last_stat_logged_at: string;
+      view_count?: number | null;
+      like_count?: number | null;
+      comment_count?: number | null;
+      stat_fetch_frequency_hours?: number | null; // 必要なら追加
+    }> = [];
 
     for (let i = 0; i < videoIdsToFetch.length; i += 50) {
       const batchVideoIds = videoIdsToFetch.slice(i, i + 50);
       const videosDetailsResponse: GaxiosResponse<youtube_v3.Schema$VideoListResponse> =
         await youtube.videos.list({
-          part: ['statistics'], // 統計情報のみ取得
+          part: ['statistics'],
           id: batchVideoIds,
         });
 
@@ -87,16 +93,33 @@ export async function GET(_request: NextRequest) { // Cron JobからはGETリク
               comment_count: videoData.statistics.commentCount ? parseInt(videoData.statistics.commentCount, 10) : null,
             });
 
-            const nextFetchTime = getNextScheduledFetchTime(new Date());
-            // videosテーブルに最新統計をキャッシュするロジックもここに追加
+            // 次の取得時刻と頻度を決定するロジック (より詳細に)
+            const publishedDate = new Date(correspondingVideoInDb.published_at || 0);
+            const hoursSincePublished = (currentTime.getTime() - publishedDate.getTime()) / (1000 * 60 * 60);
+            
+            let nextFetchFrequencyHours = 24; // デフォルト24時間
+            // ユーザー定義の取得頻度ロジック (例)
+            if (hoursSincePublished <= 24) {
+              nextFetchFrequencyHours = 1; // 1時間ごと
+            } else if (hoursSincePublished <= 72) {
+              nextFetchFrequencyHours = 3; // 3時間ごと
+            }
+            // テスト用: 常に30分ごとにするなら固定値 (0.5時間)
+            // nextFetchFrequencyHours = 0.5; 
+
+            // const nextFetchTime = getNextScheduledFetchTime(new Date()); // これは「次の正時/30分」固定
+            const nextFetchTime = new Date(currentTime.getTime() + nextFetchFrequencyHours * 60 * 60 * 1000);
+
+
             videoScheduleUpdates.push({
               id: correspondingVideoInDb.id,
               last_stat_logged_at: fetchedAtISO,
               next_stat_fetch_at: nextFetchTime.toISOString(),
+              stat_fetch_frequency_hours: nextFetchFrequencyHours, // 更新後の頻度も保存
+              // videosテーブルにキャッシュする統計情報
               view_count: videoData.statistics.viewCount ? parseInt(videoData.statistics.viewCount, 10) : null,
               like_count: videoData.statistics.likeCount ? parseInt(videoData.statistics.likeCount, 10) : null,
               comment_count: videoData.statistics.commentCount ? parseInt(videoData.statistics.commentCount, 10) : null,
-              // stat_fetch_frequency_hours: 0.5, // 必要なら更新ロジックを追加
             });
           }
         }
@@ -121,11 +144,10 @@ export async function GET(_request: NextRequest) { // Cron JobからはGETリク
           .update({
             last_stat_logged_at: update.last_stat_logged_at,
             next_stat_fetch_at: update.next_stat_fetch_at,
-            // videosテーブルにキャッシュする統計情報も更新
+            stat_fetch_frequency_hours: update.stat_fetch_frequency_hours,
             view_count: update.view_count,
             like_count: update.like_count,
             comment_count: update.comment_count,
-            // stat_fetch_frequency_hours: update.stat_fetch_frequency_hours,
           })
           .eq('id', update.id);
         if (scheduleUpdateError) {
@@ -144,9 +166,7 @@ export async function GET(_request: NextRequest) { // Cron JobからはGETリク
   }
 }
 
-// videosテーブルのメタデータ更新用API (1日単位) - 別途作成・Cron設定
-// ★★★ request を _request に修正 ★★★
-export async function GET_metadata(_request: NextRequest) { // 関数名を変更例
+export async function GET_metadata(_request: NextRequest) { // ★★★ _request は使用しないことを明示 (型は残す) ★★★
     console.log("Scheduled video metadata update job started (placeholder).");
     // TODO: videosテーブルの last_metadata_fetched_at を見て、1日以上経過した動画の
     // snippet, contentDetails を youtube.videos.list で取得し、
