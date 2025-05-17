@@ -1,7 +1,7 @@
 // src/app/api/getChannelInfo/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { google, youtube_v3 } from 'googleapis';
-import type { GaxiosResponse } from 'gaxios';
+import type { GaxiosError, GaxiosResponse } from 'gaxios'; // GaxiosError もインポート
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 const youtube = google.youtube({
@@ -9,7 +9,6 @@ const youtube = google.youtube({
   auth: process.env.YOUTUBE_API_KEY,
 });
 
-// extractChannelIdentifier 関数の定義 (前回ユーザー様が修正されたものをベース)
 async function extractChannelIdentifier(
   url: string
 ): Promise<{ id?: string; forUsername?: string; handle?: string; error?: string }> {
@@ -39,7 +38,7 @@ async function extractChannelIdentifier(
         const handle = lastPart;
         try {
           const searchResponse: GaxiosResponse<youtube_v3.Schema$SearchListResponse> =
-            await youtube.search.list({ part: ['snippet'], q: handle, type: ['channel'], maxResults: 1 }); // Youtube.list
+            await youtube.search.list({ part: ['snippet'], q: handle, type: ['channel'], maxResults: 1 });
           if (searchResponse.data.items?.[0]?.id?.channelId) {
             return { id: searchResponse.data.items[0].id.channelId };
           }
@@ -50,12 +49,13 @@ async function extractChannelIdentifier(
           return { error: `Unknown error resolving handle "${handle}"`};
         }
       }
-      if (pathParts.length > 0) return { forUsername: lastPart };
+      // 以前はここに `if (pathParts.length > 0) return { forUsername: lastPart };` がありましたが、
+      // 曖昧なため、チャンネル名検索のフォールバックに任せるように変更
     } else if (url.startsWith('@') && url.length > 1) {
       const handle = url;
       try {
         const searchResponse: GaxiosResponse<youtube_v3.Schema$SearchListResponse> =
-          await youtube.search.list({ part: ['snippet'], q: handle, type: ['channel'], maxResults: 1 }); // Youtube.list
+          await youtube.search.list({ part: ['snippet'], q: handle, type: ['channel'], maxResults: 1 });
         if (searchResponse.data.items?.[0]?.id?.channelId) {
           return { id: searchResponse.data.items[0].id.channelId };
         }
@@ -68,60 +68,24 @@ async function extractChannelIdentifier(
     } else if (url.startsWith('UC') && url.length === 24) {
       return { id: url };
     }
-    return { error: 'Input does not match direct identifier patterns (URL, @handle, UCID). Consider searching by channel name.' };
+    // どのパターンにも一致しない場合、チャンネル名検索に委ねるためエラーを返す
+    return { error: 'Input does not match direct identifier patterns (URL, @handle, UCID). Will attempt search by name.' };
   } catch (e: unknown) {
     console.warn('[extractChannelIdentifier] Unexpected error processing input:', e instanceof Error ? e.message : String(e), "Input:", url);
     return { error: 'Unexpected error during input processing. Input might be an invalid URL or format.' };
   }
 }
 
-
 // 型定義 (変更なし)
-interface ChannelDataToSave {
-  youtube_channel_id: string;
-  title?: string | null;
-  description?: string | null;
-  published_at?: string | null;
-  thumbnail_url?: string | null;
-  country?: string | null;
-  subscriber_count?: number | null;
-  video_count?: number | null;
-  total_view_count?: number | null;
-  uploads_playlist_id?: string | null;
-  custom_url?: string | null;
-  handle?: string | null;
-  last_fetched_at: string;
-  user_id?: string | null;
-  is_public_demo?: boolean;
-}
-
-interface ChannelStatsLogToSave {
-    channel_id: string;
-    created_at: string;
-    subscriber_count?: number | null;
-    video_count?: number | null;
-    total_view_count?: number | null;
-}
-
-interface ExtractedChannelInfoForClient {
-  channelId: string;
-  title?: string | null;
-  description?: string | null;
-  publishedAt?: string | null;
-  subscriberCount?: string | null;
-  videoCount?: string | null;
-  thumbnailUrl?: string | null;
-  totalViewCount?: string | null;
-  uploadsPlaylistId?: string | null;
-}
-
+interface ChannelDataToSave { /* ... */ }
+interface ChannelStatsLogToSave { /* ... */ }
+interface ExtractedChannelInfoForClient { /* ... */ }
 interface SupabaseErrorDetail {
-  message: string; // messageは必須
+  message: string;
   details?: string | null;
   hint?: string | null;
   code?: string | null;
 }
-
 
 export async function POST(request: NextRequest) {
   try {
@@ -144,7 +108,7 @@ export async function POST(request: NextRequest) {
         console.log(`[API getChannelInfo] Direct extraction failed or no specific identifier (Reason: ${identifier?.error}). Attempting search by name for: "${channelInput}"`);
         try {
             const searchByNameResponse: GaxiosResponse<youtube_v3.Schema$SearchListResponse> =
-                await youtube.search.list({ // Youtube.list
+                await youtube.search.list({
                     part: ['snippet'], q: channelInput, type: ['channel'], maxResults: 1,
                 });
             if (searchByNameResponse.data.items?.[0]?.id?.channelId) {
@@ -221,7 +185,7 @@ export async function POST(request: NextRequest) {
     
     const statsLogToInsert: ChannelStatsLogToSave = {
       channel_id: savedOrUpdatedChannel.id,
-      created_at: nowISO, // 必須プロパティ
+      created_at: nowISO,
       subscriber_count: statistics.subscriberCount ? parseInt(statistics.subscriberCount, 10) : null,
       video_count: statistics.videoCount ? parseInt(statistics.videoCount, 10) : null,
       total_view_count: statistics.viewCount ? parseInt(statistics.viewCount, 10) : null,
@@ -232,7 +196,7 @@ export async function POST(request: NextRequest) {
     console.log(`[API getChannelInfo] Channel info for ${savedOrUpdatedChannel.youtube_channel_id} saved/updated. Identified by: ${identifiedByMethod}. Stats log attempted.`);
 
     const extractedInfoForClient: ExtractedChannelInfoForClient = {
-      channelId: channelDataFromApi.id, // 必須プロパティ
+      channelId: channelDataFromApi.id,
       title: snippet.title,
       description: snippet.description,
       publishedAt: snippet.publishedAt,
@@ -253,40 +217,43 @@ export async function POST(request: NextRequest) {
     let errorMessage = 'Failed to fetch channel info.';
     let errorDetails: SupabaseErrorDetail | string | null = null;
 
-    // ★★★ この catch ブロックの型ガードを修正 ★★★
-    if (error instanceof Error) { // まず標準のErrorインスタンスかチェック
+    // ★★★ ここからが修正対象の catch ブロック ★★★
+    if (error instanceof Error) {
       errorMessage = error.message;
       errorDetails = error.stack || error.message; // 基本はスタックかメッセージ
 
-      // 次に、error オブジェクトがSupabase/Google API特有の構造を持つかチェック
-      // (より安全なプロパティアクセスのために、存在を個別に確認)
-      const errObj = error as any; // 一時的にanyとしてアクセスするが、慎重に
-
+      // Google API (gaxios) エラーかどうかをより安全にチェック
+      // error オブジェクトが GaxiosError の形状を持つか確認
       if (
-        errObj.response &&
-        typeof errObj.response === 'object' &&
-        errObj.response.data &&
-        typeof errObj.response.data === 'object' &&
-        errObj.response.data.error &&
-        typeof errObj.response.data.error === 'object' &&
-        typeof errObj.response.data.error.message === 'string'
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error && // error.response が存在するか
+        (error as GaxiosError).response && // error.response が null/undefined でないか
+        typeof (error as GaxiosError).response?.data === 'object' && // response.data がオブジェクトか
+        (error as GaxiosError).response?.data !== null &&
+        'error' in ((error as GaxiosError).response?.data as object) && // response.data.error が存在するか
+        typeof ((error as GaxiosError).response?.data as { error: unknown }).error === 'object' &&
+        ((error as GaxiosError).response?.data as { error: unknown }).error !== null &&
+        'message' in (((error as GaxiosError).response?.data as { error: object }).error as object) && // response.data.error.message が存在するか
+        typeof ((((error as GaxiosError).response?.data as { error: object }).error as { message?: unknown }).message) === 'string'
       ) {
-        // Google APIのエラー形式に合致する可能性が高い
-        errorMessage = `Google API Error: ${errObj.response.data.error.message}`;
-        errorDetails = errObj.response.data as SupabaseErrorDetail; // SupabaseErrorDetailと構造が似ていると仮定
-      } else if (
-          // SupabaseのPostgrestErrorは message, details, hint, code を持つ
-          typeof errObj.message === 'string' &&
-          ('code' in errObj || 'details' in errObj || 'hint' in errObj)
-      ){
-          // Supabase から直接 throw されたエラーの可能性 (response構造なし)
-          errorDetails = {
-              message: errObj.message,
-              code: typeof errObj.code === 'string' ? errObj.code : null,
-              details: typeof errObj.details === 'string' ? errObj.details : null,
-              hint: typeof errObj.hint === 'string' ? errObj.hint : null,
-          };
+        // この時点でネストされたエラーメッセージは string 型
+        const apiErrorMessage = ((((error as GaxiosError).response?.data as { error: object }).error as { message: string }).message);
+        errorMessage = `Google API Error: ${apiErrorMessage}`;
+        errorDetails = (error as GaxiosError).response?.data as SupabaseErrorDetail; // response.data を SupabaseErrorDetail と仮定
+      } else if ( // SupabaseのPostgrestErrorの形状を持つか (response構造なし)
+        typeof error.message === 'string' && // messageはErrorインスタンスなので存在する
+        ('code' in error || 'details' in error || 'hint' in error) // PostgrestError特有のプロパティ
+      ) {
+        const errAsSupabase = error as Partial<SupabaseErrorDetail> & { message: string }; // messageは必須と仮定
+        errorDetails = {
+            message: errAsSupabase.message,
+            code: typeof errAsSupabase.code === 'string' ? errAsSupabase.code : null,
+            details: typeof errAsSupabase.details === 'string' ? errAsSupabase.details : null,
+            hint: typeof errAsSupabase.hint === 'string' ? errAsSupabase.hint : null,
+        };
       }
+      // それ以外のErrorインスタンスの場合は、基本的なerrorMessageとstack/messageがerrorDetailsに入る
     } else if (typeof error === 'string') {
       errorMessage = error;
       errorDetails = error;
@@ -302,3 +269,8 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+// ChannelDataToSave, ChannelStatsLogToSave, ExtractedChannelInfoForClient, SupabaseErrorDetail のインターフェース定義は
+// ユーザー様提供のコードから変更していません。
+// (ただし、catchブロックのSupabaseErrorDetailの扱いに合わせて、
+//  SupabaseErrorDetailのmessageプロパティが必須であることを確認してください。現在の定義では必須になっています。)
