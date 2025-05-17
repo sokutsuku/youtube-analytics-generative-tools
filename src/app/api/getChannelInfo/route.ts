@@ -304,7 +304,7 @@ export async function POST(request: NextRequest) {
             hint: ('hint' in pgError && typeof pgError.hint === 'string') ? pgError.hint : null,
         };
       }
-      // それ以外の Error インスタンスの場合は、既に設定された errorMessage と errorDetails (stack) を使う
+
     } else if (typeof error === 'string') {
       errorMessage = error;
       errorDetails = error;
@@ -312,7 +312,6 @@ export async function POST(request: NextRequest) {
       errorMessage = 'An unknown error occurred.';
       errorDetails = 'The error object was not an instance of Error, a GaxiosError, a PostgrestError, or a string.';
     }
-    // ★★★ ここまで修正 ★★★
 
     return NextResponse.json(
       { message: errorMessage, error: errorMessage, details: errorDetails },
@@ -320,7 +319,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-
-// ChannelDataToSave, ChannelStatsLogToSave, ExtractedChannelInfoForClient, SupabaseErrorDetail のインターフェース定義は
-// ユーザー様提供のコードから変更していません。
-// extractChannelIdentifier関数内の `Youtube.list` 呼び出しも前回修正済みです。
