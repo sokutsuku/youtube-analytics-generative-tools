@@ -25,12 +25,6 @@ interface VideoDetailsForClient {
   // view_count, like_count, comment_count は AccordionItem で別途取得・表示
 }
 
-interface PageProps {
-  params: {
-    youtubeChannelId: string;
-  };
-}
-
 // Supabaseのエラーオブジェクトが持つ可能性のあるプロパティの型
 interface SupabaseErrorDetail {
   message: string;
@@ -38,6 +32,13 @@ interface SupabaseErrorDetail {
   hint?: string | null;
   code?: string | null;
 }
+
+// Next.js App RouterのPageProps型を明示的に定義
+export type PageProps = {
+  params: {
+    youtubeChannelId: string;
+  };
+};
 
 async function getChannelPageData(youtubeChannelId: string): Promise<{
   channel: ChannelDetailsForClient | null;
@@ -111,12 +112,10 @@ async function getChannelPageData(youtubeChannelId: string): Promise<{
 }
 
 
-export default async function ChannelPage({ params }: PageProps) {
-
-  const youtubeChannelId = params.youtubeChannelId;
-  console.log("ChannelPage received params:", params);
+export default async function ChannelPage(props: PageProps) {
+  const { youtubeChannelId } = props.params;
   if (!youtubeChannelId) {
-      return <div className="container mx-auto p-4 text-red-500">Error: Channel ID not found in params.</div>;
+    return <div className="container mx-auto p-4 text-red-500">Error: Channel ID not found in params.</div>;
   }
   const { channel, videos, error, errorDetails } = await getChannelPageData(youtubeChannelId);
 
