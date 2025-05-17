@@ -2,19 +2,33 @@
 'use client';
 
 import { useState, FormEvent } from 'react';
-import { useRouter } from 'next/navigation'; // ページリフレッシュ用
+import { useRouter } from 'next/navigation';
 
-// 型定義 (共通化推奨)
+// 型定義
 interface ChannelInfo {
   channelId: string;
   title?: string | null;
+  // 必要であればAPIルートが返す他のプロパティも追加
 }
+
+// ★★★ Supabaseのエラー詳細の型を定義 (APIルート側と共通化推奨) ★★★
+interface SupabaseErrorDetailForClient {
+  message: string;
+  details?: string | null;
+  hint?: string | null;
+  code?: string | null;
+}
+
 interface ChannelApiResponse {
   message: string;
   data?: ChannelInfo;
   error?: string;
-  details?: any;
+  details?: SupabaseErrorDetailForClient | string | null; // ★★★ any を修正 ★★★
 }
+
+// ヘルパー関数 (もしこのファイルで必要なら定義、通常はutilsなどからインポート)
+// const formatDate = (...) // このファイルでは未使用なので削除済み
+// const formatCount = (...) // このファイルでは未使用なので削除済み
 
 export default function ClientChannelRegistrationForm() {
   const router = useRouter();
@@ -36,24 +50,31 @@ export default function ClientChannelRegistrationForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           channelUrl: youtubeChannelUrl,
-          // is_public_demo: true, // 必要に応じてここでデモフラグを設定
-          // userId: 'your-user-id' // ユーザー認証導入後に設定
+          // is_public_demo: true, // 必要に応じて
+          // userId: 'some_user_id', // 必要に応じて
         }),
       });
 
       const result: ChannelApiResponse = await response.json();
 
-      if (!response.ok || result.error) {
-        throw new Error(result.error || result.message || 'チャンネル情報の登録/更新に失敗しました。');
+      if (!response.ok) { // まずHTTPステータスコードでエラーを判断
+        // エラーレスポンスの message または error プロパティを優先して使用
+        const errorMessage = result.error || result.message || `チャンネル情報の登録/更新に失敗しました (ステータス: ${response.status})。`;
+        throw new Error(errorMessage);
       }
 
-      if (result.data) {
+      // response.ok だが、APIがカスタムエラーを返している場合 (result.error が存在するなど)
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      if (result.data && result.data.channelId) {
         setLastAddedChannelInfo(result.data);
-        setYoutubeChannelUrl(''); // 入力欄をクリア
+        setYoutubeChannelUrl('');
         alert(`チャンネル「${result.data.title || result.data.channelId}」を登録/更新しました。上のリストが更新されます。`);
-        router.refresh(); // サーバーコンポーネントのデータを再取得し、ページをリフレッシュ
+        router.refresh();
       } else {
-        throw new Error('チャンネル情報の登録後、有効なデータが返されませんでした。');
+        throw new Error('チャンネル情報の登録後、有効なデータまたはチャンネルIDが返されませんでした。');
       }
     } catch (err: unknown) {
       if (err instanceof Error) {
