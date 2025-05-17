@@ -1,14 +1,13 @@
-// src/components/ChannelDisplay.tsx
+// src/components/sections/ChannelDisplay.tsx
 'use client';
 
-import { useState } from 'react'; // useEffect はまだ使っていないので削除
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Image from 'next/image'; // Imageコンポーネントをインポート
 
-// 型定義 (page.tsxからインポートするか、共通ファイルに定義)
-// これらの型定義は、このファイルの外部（例: src/types/index.ts）に定義し、
-// ここや page.tsx からインポートするのが理想的です。
+// 型定義
 interface ChannelDetailsForClient {
-  id: string;
+  id: string; // Supabaseのchannelsテーブルのid (uuid)
   youtube_channel_id: string;
   title?: string | null;
   description?: string | null;
@@ -18,16 +17,19 @@ interface ChannelDetailsForClient {
   video_count?: number | null;
   total_view_count?: number | null;
 }
+
 interface VideoDetailsForClient {
   id: string; // Supabaseのvideosテーブルのid (uuid)
   youtube_video_id: string;
   title?: string | null;
   thumbnail_url?: string | null;
   published_at?: string | null;
+  // videosテーブルにキャッシュする最新統計 (オプショナル)
   view_count?: number | null;
   like_count?: number | null;
   comment_count?: number | null;
 }
+
 interface VideoStatLogItem {
   fetched_at: string;
   view_count?: number | null;
@@ -40,33 +42,27 @@ interface ChannelDisplayProps {
   initialVideos: VideoDetailsForClient[];
 }
 
-// ★★★ formatDate と formatCount 関数をファイルスコープに定義（またはutilsからインポート）★★★
+// ヘルパー関数 (共通utilsファイルに切り出すのが理想)
 const formatDate = (isoDateString?: string | null): string => {
   if (!isoDateString) return 'N/A';
   try {
     return new Date(isoDateString).toLocaleDateString('ja-JP', {
       year: 'numeric', month: 'long', day: 'numeric'
     });
-  } catch (_error: unknown) { // エラーオブジェクトを受け取る (使わない場合はアンダースコア)
+  } catch (_error: unknown) {
     console.error("Error formatting date:", isoDateString, _error);
     return 'Invalid Date';
   }
 };
 
 const formatCount = (count?: string | null | number): string => {
-  if (count == null) return 'N/A'; // null または undefined の場合
+  if (count == null) return 'N/A';
   const num = typeof count === 'string' ? parseInt(count, 10) : count;
-  if (isNaN(num)) return 'N/A'; // parseInt が失敗した場合
-
-  if (num >= 100000000) {
-      return (num / 100000000).toFixed(1).replace(/\.0$/, '') + '億';
-  }
-  if (num >= 10000) {
-      return (num / 10000).toFixed(1).replace(/\.0$/, '') + '万';
-  }
+  if (isNaN(num)) return 'N/A';
+  if (num >= 100000000) return (num / 100000000).toFixed(1).replace(/\.0$/, '') + '億';
+  if (num >= 10000) return (num / 10000).toFixed(1).replace(/\.0$/, '') + '万';
   return num.toLocaleString();
 };
-// ★★★ ここまで ★★★
 
 
 const AccordionItem: React.FC<{
@@ -75,19 +71,25 @@ const AccordionItem: React.FC<{
 }> = ({ video, fetchStatsLog }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [statsLog, setStatsLog] = useState<VideoStatLogItem[] | null>(null);
+  const [latestStatsInAccordion, setLatestStatsInAccordion] = useState<VideoStatLogItem | null>(null); // アコーディオン内で表示する最新統計
   const [isLoadingStats, setIsLoadingStats] = useState(false);
   const [statsError, setStatsError] = useState<string>('');
 
-  const toggleAccordion = async () => {
+  const handleToggleAccordion = async () => {
     const newIsOpen = !isOpen;
     setIsOpen(newIsOpen);
-    if (newIsOpen && !statsLog) {
+    // アコーディオンを開き、かつまだ統計履歴も最新統計も読み込まれていない場合に取得
+    if (newIsOpen && !statsLog && !latestStatsInAccordion) {
       setIsLoadingStats(true);
       setStatsError('');
       try {
-        const logData = await fetchStatsLog(video.id);
-        setStatsLog(logData);
-      } catch (err: unknown) { // catch のエラー型を unknown に
+        const logData = await fetchStatsLog(video.id); // video.id はSupabaseのvideosテーブルの主キー
+        setStatsLog(logData || []); // null の場合は空配列に
+        if (logData && logData.length > 0) {
+          // ログデータは fetched_at で昇順ソートされている前提
+          setLatestStatsInAccordion(logData[logData.length - 1]);
+        }
+      } catch (err: unknown) {
         if (err instanceof Error) {
           setStatsError(err.message || 'Failed to load stats history.');
         } else {
@@ -99,18 +101,37 @@ const AccordionItem: React.FC<{
     }
   };
 
+  // video prop から直接最新統計情報を表示 (初期表示用、キャッシュされている場合)
+  const initialDisplayStats = {
+    view_count: video.view_count,
+    like_count: video.like_count,
+    comment_count: video.comment_count,
+  };
+
   return (
-    <div className="border-b border-gray-200">
+    <div className="border-b border-gray-200 last:border-b-0">
       <motion.button
-        onClick={toggleAccordion}
-        className="flex justify-between items-center w-full py-3 px-2 text-left hover:bg-gray-50 focus:outline-none"
+        onClick={handleToggleAccordion}
+        className="flex justify-between items-center w-full py-3 px-2 text-left hover:bg-gray-50 focus:outline-none rounded-t-md"
+        aria-expanded={isOpen}
       >
-        <div className="flex items-center space-x-3">
-          {video.thumbnail_url && <img src={video.thumbnail_url} alt={video.title || ''} className="w-20 h-12 object-cover rounded-md"/>}
+        <div className="flex items-center space-x-3 min-w-0">
+          {video.thumbnail_url && (
+            <div className="w-20 h-12 relative rounded-md overflow-hidden flex-shrink-0">
+              <Image
+                src={video.thumbnail_url}
+                alt={video.title || 'Video thumbnail'}
+                layout="fill"
+                objectFit="cover"
+                priority={false} // リスト内の画像なのでpriorityはfalseで良い場合が多い
+              />
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-800 truncate" title={video.title || ''}>{video.title || 'タイトルなし'}</p>
+            {/* 初期表示では VideoDetailsForClient の統計情報を表示 */}
             <p className="text-xs text-gray-500">
-              再生: {formatCount(video.view_count)} | いいね: {formatCount(video.like_count)} | コメント: {formatCount(video.comment_count)}
+              再生: {formatCount(initialDisplayStats.view_count)} | いいね: {formatCount(initialDisplayStats.like_count)} | コメント: {formatCount(initialDisplayStats.comment_count)}
             </p>
           </div>
         </div>
@@ -126,25 +147,36 @@ const AccordionItem: React.FC<{
             animate="open"
             exit="collapsed"
             variants={{
-              open: { opacity: 1, height: 'auto', marginTop: '8px', marginBottom: '8px' },
+              open: { opacity: 1, height: 'auto', marginTop: '8px', marginBottom: '16px' },
               collapsed: { opacity: 0, height: 0, marginTop: '0px', marginBottom: '0px' },
             }}
             transition={{ duration: 0.3, ease: "easeInOut" }}
-            className="px-2 pb-3 text-sm"
+            className="px-3 pb-3 text-sm" // pxを少し増やす
           >
-            {isLoadingStats && <p className="text-gray-500">統計履歴を読み込み中...</p>}
-            {statsError && <p className="text-red-500">{statsError}</p>}
+            {isLoadingStats && <p className="text-gray-500 py-2">統計履歴を読み込み中...</p>}
+            {statsError && <p className="text-red-500 py-2">{statsError}</p>}
+            {/* アコーディオン内に最新統計を再表示 (fetch後) */}
+            {latestStatsInAccordion && !isLoadingStats && !statsError && (
+                 <p className="text-xs text-gray-700 font-semibold mb-2 py-1 border-b">
+                    最新ログ: 再: {formatCount(latestStatsInAccordion.view_count)}, 👍: {formatCount(latestStatsInAccordion.like_count)}, 💬: {formatCount(latestStatsInAccordion.comment_count)} ({formatDate(latestStatsInAccordion.fetched_at)})
+                 </p>
+            )}
             {statsLog && statsLog.length > 0 && (
               <div className="mt-2 space-y-1 max-h-60 overflow-y-auto border p-2 rounded-md bg-gray-50">
-                <p className="font-semibold text-xs text-gray-700">再生数・いいね・コメント数の変遷:</p>
-                {statsLog.map((log, index) => (
-                  <div key={index} className="text-xs text-gray-600 border-b last:border-b-0 py-1">
-                    <span className="font-medium">{formatDate(log.fetched_at)}:</span> 再: {formatCount(log.view_count)}, 👍: {formatCount(log.like_count)}, 💬: {formatCount(log.comment_count)}
+                <p className="font-semibold text-xs text-gray-700 mb-1">変遷履歴 (新しい順):</p>
+                {statsLog.slice().reverse().map((log, index) => ( // 新しい順に表示
+                  <div key={index} className="text-xs text-gray-600 border-b last:border-b-0 py-1 flex justify-between">
+                    <span className="font-medium">{formatDate(log.fetched_at)}:</span>
+                    <span>再: {formatCount(log.view_count)}</span>
+                    <span>👍: {formatCount(log.like_count)}</span>
+                    <span>💬: {formatCount(log.comment_count)}</span>
                   </div>
                 ))}
               </div>
             )}
-            {statsLog && statsLog.length === 0 && !isLoadingStats && <p className="text-gray-500">統計履歴はありません。</p>}
+            {statsLog && statsLog.length === 0 && !isLoadingStats && !statsError &&(
+                <p className="text-gray-500 py-2">統計履歴はありません。</p>
+            )}
           </motion.section>
         )}
       </AnimatePresence>
@@ -154,59 +186,72 @@ const AccordionItem: React.FC<{
 
 
 export default function ChannelDisplay({ initialChannel, initialVideos }: ChannelDisplayProps) {
-  const [channel, setChannel] = useState(initialChannel);
-  const [videos, setVideos] = useState(initialVideos);
+  // propsを直接利用するため、useStateは不要
+  const channel = initialChannel;
+  const videos = initialVideos;
 
   const fetchVideoStatsLog = async (supabaseVideoId: string): Promise<VideoStatLogItem[]> => {
     const response = await fetch(`/api/getVideoStatsLog/${supabaseVideoId}`);
     if (!response.ok) {
-      // エラーレスポンスがJSON形式であると仮定
       let errorDetails = 'Failed to fetch video stats log';
       try {
         const errorData = await response.json();
         errorDetails = errorData.error || errorData.message || errorDetails;
       } catch (e) {
-        // JSONパースに失敗した場合
-        console.error('Failed to parse error response as JSON', e);
+        console.error('Failed to parse error response as JSON while fetching video stats log:', e);
       }
       throw new Error(errorDetails);
     }
-    return response.json();
+    const data = await response.json();
+    return (data as VideoStatLogItem[]) || []; // nullの場合も空配列に
   };
 
-  // ChannelDisplay コンポーネント内で formatDate と formatCount を再定義する必要はないので削除
-
   return (
-    <div className="space-y-8">
+    <div className="space-y-10"> {/* space-yを調整 */}
       {/* チャンネル基本情報 */}
-      <section className="bg-white shadow-lg rounded-lg p-6">
-        <div className="flex items-center space-x-4 mb-4">
-          {channel.thumbnail_url && <img src={channel.thumbnail_url} alt={channel.title || ''} className="w-24 h-24 rounded-full shadow-md"/>}
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">{channel.title || 'チャンネル名なし'}</h1>
-            <p className="text-sm text-gray-500">チャンネルID: {channel.youtube_channel_id}</p>
+      <section className="bg-white shadow-xl rounded-lg p-6">
+        <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6 mb-6">
+          {channel.thumbnail_url && (
+            <div className="w-28 h-28 relative rounded-full shadow-lg overflow-hidden flex-shrink-0">
+              <Image
+                src={channel.thumbnail_url}
+                alt={channel.title || 'Channel thumbnail'}
+                layout="fill"
+                objectFit="cover"
+                priority // ページのメイン画像の一つなのでpriorityをtrueに
+              />
+            </div>
+          )}
+          <div className="text-center sm:text-left">
+            <h1 className="text-3xl lg:text-4xl font-bold text-gray-800">{channel.title || 'チャンネル名なし'}</h1>
+            <p className="text-sm text-gray-500 mt-1">YouTube Channel ID: {channel.youtube_channel_id}</p>
+            {channel.published_at && <p className="text-xs text-gray-400 mt-1">開設日: {formatDate(channel.published_at)}</p>}
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center mb-4">
-          <div><p className="text-xs text-gray-500">登録者数</p><p className="text-xl font-semibold">{formatCount(channel.subscriber_count)}</p></div>
-          <div><p className="text-xs text-gray-500">総再生回数</p><p className="text-xl font-semibold">{formatCount(channel.total_view_count)}</p></div>
-          <div><p className="text-xs text-gray-500">動画本数</p><p className="text-xl font-semibold">{formatCount(channel.video_count)}</p></div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center mb-4 py-4 border-y">
+          <div><p className="text-sm text-gray-500 uppercase tracking-wider">登録者数</p><p className="text-2xl font-semibold text-gray-700">{formatCount(channel.subscriber_count)}</p></div>
+          <div><p className="text-sm text-gray-500 uppercase tracking-wider">総再生回数</p><p className="text-2xl font-semibold text-gray-700">{formatCount(channel.total_view_count)}</p></div>
+          <div><p className="text-sm text-gray-500 uppercase tracking-wider">動画本数</p><p className="text-2xl font-semibold text-gray-700">{formatCount(channel.video_count)}</p></div>
         </div>
-        {channel.description && <p className="text-sm text-gray-600 mt-2 whitespace-pre-wrap max-h-24 overflow-y-auto">{channel.description}</p>}
-        {channel.published_at && <p className="text-xs text-gray-400 mt-2">開設日: {formatDate(channel.published_at)}</p>}
+        {channel.description && (
+            <details className="text-sm text-gray-600 mt-3">
+                <summary className="cursor-pointer font-medium text-gray-700 hover:underline">概要を見る</summary>
+                <p className="mt-1 whitespace-pre-wrap prose prose-sm max-w-none">{channel.description}</p>
+            </details>
+        )}
       </section>
 
       {/* 動画一覧 */}
-      <section className="bg-white shadow-lg rounded-lg p-6">
-        <h2 className="text-2xl font-semibold text-gray-700 mb-4">動画一覧 ({videos.length}件)</h2>
+      <section className="bg-white shadow-xl rounded-lg p-6">
+        <h2 className="text-2xl font-semibold text-gray-700 mb-6">動画一覧 ({videos.length > 0 ? `${videos.length}件` : 'なし'})</h2>
         {videos.length > 0 ? (
-          <div className="space-y-1">
+          <div className="divide-y divide-gray-200"> {/* 区切り線を追加 */}
             {videos.map((video) => (
               <AccordionItem key={video.id} video={video} fetchStatsLog={fetchVideoStatsLog} />
             ))}
           </div>
         ) : (
-          <p className="text-gray-500">このチャンネルの動画はまだありません。</p>
+          <p className="text-gray-500 py-4 text-center">このチャンネルの動画はまだありません。</p>
         )}
       </section>
     </div>
