@@ -1,5 +1,5 @@
 // src/app/api/scheduledVideoStatsFetch/route.ts
-import { NextResponse, type NextRequest } from 'next/server'; // NextRequest をインポート
+import { NextResponse, type NextRequest } from 'next/server';
 import { google, youtube_v3 } from 'googleapis';
 import type { GaxiosResponse } from 'gaxios';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
@@ -17,15 +17,10 @@ interface VideoStatsLogToSave {
   comment_count?: number | null;
 }
 
-// ★★★ GET 関数のシグネチャを修正 ★★★
-export async function GET(request: NextRequest) { // request 引数を追加 (未使用の場合は _request)
-  // もし request を使わないなら、ESLintエラーを避けるために _request とするか、
-  // 関数の先頭で // eslint-disable-next-line @typescript-eslint/no-unused-vars とコメントする
-  // console.log('Request object (can be ignored if not used):', request.url); // 例: request を使う場合
-
+export async function GET(request: NextRequest) { // request引数をNextRequest型で受け取る
   try {
     const currentTime = new Date();
-    console.log(`[${currentTime.toISOString()}] Scheduled video stats fetch job started.`);
+    console.log(`[${currentTime.toISOString()}] Scheduled video stats fetch job started. Triggered by: ${request.url}`);
 
     const { data: videosToUpdate, error: fetchError } = await supabaseAdmin
       .from('videos')
@@ -143,10 +138,5 @@ export async function GET(request: NextRequest) { // request 引数を追加 (�
   }
 }
 
-// ★★★ GET_metadata 関数のシグネチャを修正 ★★★
-export async function GET_metadata(request: NextRequest) { // request 引数を追加 (未使用の場合は _request)
-  // もし request を使わないなら、ESLintエラーを避けるために _request とするか、
-  // 関数の先頭で // eslint-disable-next-line @typescript-eslint/no-unused-vars とコメントする
-  console.log("Scheduled video metadata update job started (placeholder). Request URL:", request.url);
-  return NextResponse.json({ message: "Metadata update job placeholder." });
-}
+// ★★★ GET_metadata 関数をこのファイルから削除 ★★★
+// export async function GET_metadata(request: NextRequest) { ... }

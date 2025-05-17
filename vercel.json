@@ -3,6 +3,10 @@
     {
       "path": "/api/scheduledVideoStatsFetch",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/scheduledVideoMetadataUpdate",
+      "schedule": "0 5 * * *"
     }
   ]
 }
