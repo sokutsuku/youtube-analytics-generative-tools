@@ -9,9 +9,10 @@ const youtube = google.youtube({
   auth: process.env.YOUTUBE_API_KEY,
 });
 
+// videosテーブルのメタデータ保存用 (統計情報は含めない)
 interface VideoMetadataToSave {
   youtube_video_id: string;
-  channel_id: string;
+  channel_id: string; // Supabaseのchannelsテーブルのid (uuid)
   title?: string | null;
   description?: string | null;
   published_at?: string | null;
@@ -19,18 +20,18 @@ interface VideoMetadataToSave {
   duration?: string | null;
   tags?: string[] | null;
   category_id?: string | null;
+  // スケジュール管理用
   next_stat_fetch_at?: string | null;
   stat_fetch_frequency_hours?: number | null;
   last_stat_logged_at?: string | null;
+  // ユーザー情報とデモフラグ
   user_id?: string | null;
   is_public_demo?: boolean;
-  view_count?: number | null;
-  like_count?: number | null;
-  comment_count?: number | null;
+  // ★★★ view_count, like_count, comment_count を削除 ★★★
 }
 
 interface VideoStatsLogToSave {
-  video_id: string;
+  video_id: string; // Supabaseのvideosテーブルのid (uuid) - 必須
   fetched_at: string;
   view_count?: number | null;
   like_count?: number | null;
@@ -64,6 +65,7 @@ interface ClientVideoInfo {
   latest_comment_count?: string | null;
 }
 
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -79,24 +81,22 @@ export async function POST(request: NextRequest) {
       .eq('youtube_channel_id', youtubeChannelId)
       .single();
 
-    // ★★★ channelData の null チェックを強化 ★★★
     if (channelError) {
       console.error('Error fetching channel from Supabase (getChannelVideos):', channelError);
       const message = channelError.code === 'PGRST116' ? `Channel with youtube_channel_id "${youtubeChannelId}" not found.` : 'Failed to fetch channel data.';
       return NextResponse.json({ message, details: channelError.message }, { status: 404 });
     }
-    if (!channelData) { // .single() でエラーがない場合、通常 channelData は存在するが念のため
-        console.error('Channel data is unexpectedly null even without an error (getChannelVideos). youtubeChannelId:', youtubeChannelId);
+    if (!channelData) {
+        console.error('Channel data is unexpectedly null (getChannelVideos). youtubeChannelId:', youtubeChannelId);
         return NextResponse.json({ message: 'Channel data not found (unexpectedly null).' }, { status: 404 });
     }
     if (!channelData.uploads_playlist_id) {
         console.error('uploads_playlist_id is missing for channel (getChannelVideos):', youtubeChannelId);
         return NextResponse.json({ message: `uploads_playlist_id is missing for channel ${youtubeChannelId}.` }, { status: 404 });
     }
-    // ★★★ ここまで修正 ★★★
 
-    const supabaseChannelInternalId = channelData.id; // この時点で channelData は null ではない
-    const uploadsPlaylistId = channelData.uploads_playlist_id; // この時点で channelData.uploads_playlist_id は null ではない
+    const supabaseChannelInternalId = channelData.id;
+    const uploadsPlaylistId = channelData.uploads_playlist_id;
 
     let allPlaylistItems: youtube_v3.Schema$PlaylistItem[] = [];
     let nextPageToken: string | undefined | null = undefined;
@@ -158,6 +158,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: 'No video details could be processed from YouTube API.', data: [] });
     }
     
+    // 4. videosテーブルにメタデータをUpsert (統計情報は含めない)
     const videoMetadatasToUpsert: VideoMetadataToSave[] = fetchedVideoDetails.map(detail => ({
       youtube_video_id: detail.youtube_video_id,
       channel_id: detail.channel_id,
@@ -173,9 +174,7 @@ export async function POST(request: NextRequest) {
       last_stat_logged_at: detail.last_stat_logged_at,
       user_id: detail.user_id,
       is_public_demo: detail.is_public_demo,
-      view_count: detail.statistics?.viewCount ? parseInt(detail.statistics.viewCount, 10) : null,
-      like_count: detail.statistics?.likeCount ? parseInt(detail.statistics.likeCount, 10) : null,
-      comment_count: detail.statistics?.commentCount ? parseInt(detail.statistics.commentCount, 10) : null,
+      // ★★★ view_count, like_count, comment_count を削除 ★★★
     }));
 
     const { data: upsertedVideosData, error: videosUpsertError } = await supabaseAdmin
@@ -187,17 +186,13 @@ export async function POST(request: NextRequest) {
       console.error('Supabase error upserting videos:', videosUpsertError);
       return NextResponse.json({ message: 'Error saving video metadata to Supabase', error: videosUpsertError.message }, { status: 500 });
     }
-    // ★★★ upsertedVideosData の null チェック ★★★
     if (!upsertedVideosData) {
         console.error('No data returned after upserting videos, cannot log stats.');
-        // null の場合は空配列として扱うか、エラーにするか選択
-        // 今回は後続のループが空になるだけなので、このまま進めても良いが、エラーの方が明確
         return NextResponse.json({ message: 'Upsert operation did not return data for videos.', data: [] }, { status: 500 });
     }
-    // ★★★ ここまで修正 ★★★
 
+    // 5. video_stats_logsテーブルへの保存処理
     const statsLogsToInsert: VideoStatsLogToSave[] = [];
-    // ★★★ upsertedVideosData (nullでないことが保証された) をループ ★★★
     for (const savedVideo of upsertedVideosData) {
       const originalDetail = fetchedVideoDetails.find(detail => detail.youtube_video_id === savedVideo.youtube_video_id);
       if (originalDetail && originalDetail.statistics) {
