@@ -1,6 +1,7 @@
 // src/app/api/getChannelInfo/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { google, youtube_v3 } from 'googleapis';
+import type { GaxiosResponse } from 'gaxios';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 const youtube = google.youtube({
@@ -8,59 +9,74 @@ const youtube = google.youtube({
   auth: process.env.YOUTUBE_API_KEY,
 });
 
-// チャンネルURL/ハンドルからIDやユーザー名を抽出する関数 (前回までのものをベース)
-async function extractDirectIdentifier(inputValue: string): Promise<{ id?: string; forUsername?: string; error?: string }> {
+// extractChannelIdentifier 関数の定義 (前回ユーザー様が修正されたものをベース)
+async function extractChannelIdentifier(
+  url: string
+): Promise<{ id?: string; forUsername?: string; handle?: string; error?: string }> {
   try {
-    // URL形式のチェック
-    if (inputValue.includes('/') || inputValue.includes('.')) { // URLである可能性が高い
-        const urlObj = new URL(inputValue.startsWith('http') ? inputValue : `http://${inputValue}`); // httpがない場合補完
-        const pathParts = urlObj.pathname.split('/').filter(part => part.length > 0);
-
-        if (pathParts.length > 0) {
-        if (pathParts[0] === 'channel' && pathParts[1] && pathParts[1].startsWith('UC') && pathParts[1].length === 24) {
-            return { id: pathParts[1] };
-        }
-        if (pathParts[0] === 'user' && pathParts[1]) {
-            return { forUsername: pathParts[1] };
-        }
-        // URLの最後の部分が@ハンドルかチェック
-        const lastPart = pathParts[pathParts.length - 1];
-        if (lastPart.startsWith('@') && lastPart.length > 1) {
-            const handle = lastPart;
-            // ハンドルからチャンネルIDを検索
-            const searchResponse = await youtube.search.list({ part: ['snippet'], q: handle, type: ['channel'], maxResults: 1 });
-            if (searchResponse.data.items && searchResponse.data.items.length > 0 && searchResponse.data.items[0].id?.channelId) {
-            return { id: searchResponse.data.items[0].id.channelId };
-            } else {
-            return { error: `Handle "${handle}" (from URL path) not found or not a channel.` };
-            }
-        }
-        // URLだが標準形式でない場合、最後のパスをforUsernameとして試す (リスクあり)
-        if (pathParts.length > 0) {
-             console.log(`[extractDirectIdentifier] URL fallback to forUsername: ${pathParts[pathParts.length -1]}`);
-             return { forUsername: pathParts[pathParts.length -1] };
-        }
-        }
-    } else if (inputValue.startsWith('@') && inputValue.length > 1) { // @ハンドル単体の場合
-        const handle = inputValue;
-        const searchResponse = await youtube.search.list({ part: ['snippet'], q: handle, type: ['channel'], maxResults: 1 });
-        if (searchResponse.data.items && searchResponse.data.items.length > 0 && searchResponse.data.items[0].id?.channelId) {
-        return { id: searchResponse.data.items[0].id.channelId };
-        } else {
-        return { error: `Handle "${handle}" not found or not a channel.` };
-        }
+    let pathParts: string[] = [];
+    let isLikelyUrl = false;
+    if (url.includes('/') || url.includes('.') || url.toLowerCase().startsWith('http')) {
+      try {
+        const urlObj = new URL(url.startsWith('http') ? url : `http://${url}`);
+        pathParts = urlObj.pathname.split('/').filter(part => part.length > 0);
+        isLikelyUrl = true;
+      } catch {
+        pathParts = [];
+        isLikelyUrl = false;
+      }
     }
-    // URL形式でも@ハンドルでもない場合は、この関数では解決できない
-    return { error: 'Input is not a standard channel URL or handle format for direct extraction.' };
 
+    if (isLikelyUrl && pathParts.length > 0) {
+      if (pathParts[0] === 'channel' && pathParts[1]?.startsWith('UC') && pathParts[1].length === 24) {
+        return { id: pathParts[1] };
+      }
+      if (pathParts[0] === 'user' && pathParts[1]) {
+        return { forUsername: pathParts[1] };
+      }
+      const lastPart = pathParts[pathParts.length - 1];
+      if (lastPart.startsWith('@') && lastPart.length > 1) {
+        const handle = lastPart;
+        try {
+          const searchResponse: GaxiosResponse<youtube_v3.Schema$SearchListResponse> =
+            await youtube.search.list({ part: ['snippet'], q: handle, type: ['channel'], maxResults: 1 }); // Youtube.list
+          if (searchResponse.data.items?.[0]?.id?.channelId) {
+            return { id: searchResponse.data.items[0].id.channelId };
+          }
+          return { error: `Handle "${handle}" (from URL path) not found.` };
+        } catch (searchError: unknown) {
+          console.error(`Error searching for handle "${handle}" (from URL path):`, searchError);
+          if (searchError instanceof Error) return { error: `Error resolving handle "${handle}": ${searchError.message}`};
+          return { error: `Unknown error resolving handle "${handle}"`};
+        }
+      }
+      if (pathParts.length > 0) return { forUsername: lastPart };
+    } else if (url.startsWith('@') && url.length > 1) {
+      const handle = url;
+      try {
+        const searchResponse: GaxiosResponse<youtube_v3.Schema$SearchListResponse> =
+          await youtube.search.list({ part: ['snippet'], q: handle, type: ['channel'], maxResults: 1 }); // Youtube.list
+        if (searchResponse.data.items?.[0]?.id?.channelId) {
+          return { id: searchResponse.data.items[0].id.channelId };
+        }
+        return { error: `Handle "${handle}" not found.` };
+      } catch (searchError: unknown) {
+        console.error(`Error searching for handle "${handle}":`, searchError);
+        if (searchError instanceof Error) return { error: `Error resolving handle "${handle}": ${searchError.message}`};
+        return { error: `Unknown error resolving handle "${handle}"`};
+      }
+    } else if (url.startsWith('UC') && url.length === 24) {
+      return { id: url };
+    }
+    return { error: 'Input does not match direct identifier patterns (URL, @handle, UCID). Consider searching by channel name.' };
   } catch (e: unknown) {
-    // URLパースエラーなどもここに含まれる
-    console.warn('[extractDirectIdentifier] Error parsing input as URL or during handle search:', e instanceof Error ? e.message : String(e));
-    return { error: 'Could not determine identifier from input using direct extraction methods.' };
+    console.warn('[extractChannelIdentifier] Unexpected error processing input:', e instanceof Error ? e.message : String(e), "Input:", url);
+    return { error: 'Unexpected error during input processing. Input might be an invalid URL or format.' };
   }
 }
 
-// Supabaseのchannelsテーブルの型
+
+// 型定義 (変更なし)
 interface ChannelDataToSave {
   youtube_channel_id: string;
   title?: string | null;
@@ -73,24 +89,22 @@ interface ChannelDataToSave {
   total_view_count?: number | null;
   uploads_playlist_id?: string | null;
   custom_url?: string | null;
-  handle?: string | null; // APIから取得できるハンドル名 (snippet.customUrl が@で始まる場合など)
+  handle?: string | null;
   last_fetched_at: string;
   user_id?: string | null;
   is_public_demo?: boolean;
 }
 
-// channel_stats_logs テーブルの型
 interface ChannelStatsLogToSave {
-    channel_id: string; // Supabaseのchannelsテーブルのid (uuid)
+    channel_id: string;
     created_at: string;
     subscriber_count?: number | null;
     video_count?: number | null;
     total_view_count?: number | null;
 }
 
-// フロントエンドに返す情報の型
 interface ExtractedChannelInfoForClient {
-  channelId: string; // youtube_channel_id
+  channelId: string;
   title?: string | null;
   description?: string | null;
   publishedAt?: string | null;
@@ -101,41 +115,40 @@ interface ExtractedChannelInfoForClient {
   uploadsPlaylistId?: string | null;
 }
 
+interface SupabaseErrorDetail {
+  message: string; // messageは必須
+  details?: string | null;
+  hint?: string | null;
+  code?: string | null;
+}
+
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { channelInput, userId, isPublicDemo } = body; // フロントからは channelInput で受け取る
+    const { channelInput, userId, isPublicDemo } = body;
 
     if (!channelInput || typeof channelInput !== 'string' || channelInput.trim() === '') {
-      return NextResponse.json(
-        { message: 'Channel input (URL, name, or @handle) is required', error: 'Input required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ message: 'Channel input is required', error: 'Input required' }, { status: 400 });
     }
 
-    let identifier: { id?: string; forUsername?: string; error?: string } = {};
+    let identifier: { id?: string; forUsername?: string; error?: string };
     let identifiedByMethod: 'direct' | 'search_by_name' | 'none' = 'none';
 
-    // 1. まずURL形式や@ハンドル形式での直接的な識別子抽出を試みる
-    const directIdentifierResult = await extractDirectIdentifier(channelInput);
+    identifier = await extractChannelIdentifier(channelInput);
 
-    if (directIdentifierResult && !directIdentifierResult.error && (directIdentifierResult.id || directIdentifierResult.forUsername)) {
-        identifier = directIdentifierResult;
+    if (identifier && !identifier.error && (identifier.id || identifier.forUsername)) {
         identifiedByMethod = 'direct';
         console.log(`[API getChannelInfo] Identified by direct extraction:`, identifier);
     } else {
-        // 2. 直接抽出できなかった場合、チャンネル名としてYoutube APIで検索
-        console.log(`[API getChannelInfo] Direct extraction failed or no identifier found. Attempting search by name for: "${channelInput}"`);
+        console.log(`[API getChannelInfo] Direct extraction failed or no specific identifier (Reason: ${identifier?.error}). Attempting search by name for: "${channelInput}"`);
         try {
-            const searchResponse = await youtube.search.list({
-                part: ['snippet'],
-                q: channelInput, // 入力文字列をチャンネル名として検索
-                type: ['channel'],
-                maxResults: 1, // 最も関連性の高いものを1つ取得
-            });
-
-            if (searchResponse.data.items && searchResponse.data.items.length > 0 && searchResponse.data.items[0].id?.channelId) {
-                identifier = { id: searchResponse.data.items[0].id.channelId };
+            const searchByNameResponse: GaxiosResponse<youtube_v3.Schema$SearchListResponse> =
+                await youtube.search.list({ // Youtube.list
+                    part: ['snippet'], q: channelInput, type: ['channel'], maxResults: 1,
+                });
+            if (searchByNameResponse.data.items?.[0]?.id?.channelId) {
+                identifier = { id: searchByNameResponse.data.items[0].id.channelId };
                 identifiedByMethod = 'search_by_name';
                 console.log(`[API getChannelInfo] Identified by search_by_name:`, identifier);
             } else {
@@ -143,30 +156,27 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ message: `No channel found matching input: "${channelInput}"` }, { status: 404 });
             }
         } catch (searchError: unknown) {
-            console.error(`[API getChannelInfo] Error during Youtube for name "${channelInput}":`, searchError);
             const errMsg = searchError instanceof Error ? searchError.message : 'Unknown search error';
-            return NextResponse.json({ message: 'Error searching for channel on YouTube', error: errMsg }, { status: 500 });
+            console.error(`[API getChannelInfo] Error during Youtube for name "${channelInput}":`, searchError);
+            return NextResponse.json({ message: `Error searching for channel: ${channelInput}`, error: errMsg }, { status: 500 });
         }
     }
     
-    // 識別子が確定していなければエラー
     if (!identifier || (!identifier.id && !identifier.forUsername)) {
         return NextResponse.json({ message: `Could not resolve a valid channel identifier from input: "${channelInput}"`}, { status: 400 });
     }
 
-    // 3. チャンネル詳細情報を取得
-    const params: youtube_v3.Params$Resource$Channels$List = {
+    const paramsForChannelList: youtube_v3.Params$Resource$Channels$List = {
         part: ['snippet', 'statistics', 'contentDetails', 'brandingSettings'],
         ...(identifier.id && { id: [identifier.id] }),
         ...(identifier.forUsername && { forUsername: identifier.forUsername }),
     };
 
-    const youtubeResponse = await youtube.channels.list(params);
+    const youtubeResponse = await youtube.channels.list(paramsForChannelList);
 
     if (!youtubeResponse.data?.items || youtubeResponse.data.items.length === 0) {
       return NextResponse.json({ message: 'Channel not found on YouTube with the resolved identifier', error: 'Channel not found' }, { status: 404 });
     }
-
     const channelDataFromApi = youtubeResponse.data.items[0];
     if (!channelDataFromApi.id || !channelDataFromApi.snippet || !channelDataFromApi.statistics || !channelDataFromApi.contentDetails) {
         return NextResponse.json({ message: 'Incomplete data from YouTube API for the channel.' }, { status: 500 });
@@ -177,7 +187,6 @@ export async function POST(request: NextRequest) {
     const contentDetails = channelDataFromApi.contentDetails;
     const nowISO = new Date().toISOString();
 
-    // 4. Supabaseに保存するためのデータ整形
     const channelRecordToUpsert: ChannelDataToSave = {
       youtube_channel_id: channelDataFromApi.id,
       title: snippet.title,
@@ -190,32 +199,29 @@ export async function POST(request: NextRequest) {
       total_view_count: statistics.viewCount ? parseInt(statistics.viewCount, 10) : null,
       uploads_playlist_id: contentDetails.relatedPlaylists?.uploads,
       custom_url: snippet.customUrl,
-      handle: snippet.customUrl?.startsWith('@') ? snippet.customUrl : (snippet.title?.startsWith('@') ? snippet.title : null), // よりハンドルらしいものを探す試み
+      handle: snippet.customUrl?.startsWith('@') ? snippet.customUrl : (snippet.title?.startsWith('@') ? snippet.title : null),
       last_fetched_at: nowISO,
       user_id: userId || null,
       is_public_demo: typeof isPublicDemo === 'boolean' ? isPublicDemo : false,
     };
 
-    // 5. SupabaseのchannelsテーブルにUpsert
     const { data: savedOrUpdatedChannel, error: upsertError } = await supabaseAdmin
       .from('channels')
       .upsert(channelRecordToUpsert, { onConflict: 'youtube_channel_id' })
-      .select('id, youtube_channel_id') // 内部IDとyoutube_channel_idを返す
-      .single();
+      .select('id, youtube_channel_id').single();
 
     if (upsertError) {
       console.error('[API getChannelInfo] Supabase error upserting channel info:', upsertError);
-      return NextResponse.json({ message: 'Error saving channel info to Supabase', error: upsertError.message }, { status: 500 });
+      return NextResponse.json({ message: 'Error saving channel info to Supabase', error: upsertError.message, details: upsertError }, { status: 500 });
     }
-    if (!savedOrUpdatedChannel) {
-        console.error('[API getChannelInfo] No data returned after upserting channel, cannot log stats.');
-        return NextResponse.json({ message: 'Channel data not saved or returned from DB, cannot log stats.' }, { status: 500 });
+    if (!savedOrUpdatedChannel || !savedOrUpdatedChannel.id) {
+        console.error('[API getChannelInfo] No data or id returned after upserting channel, cannot log stats.');
+        return NextResponse.json({ message: 'Channel data not saved or valid ID not returned from DB, cannot log stats.' }, { status: 500 });
     }
     
-    // 6. Supabaseのchannel_stats_logsテーブルにINSERT
     const statsLogToInsert: ChannelStatsLogToSave = {
-      channel_id: savedOrUpdatedChannel.id, // channelsテーブルの内部ID (uuid)
-      created_at: nowISO,
+      channel_id: savedOrUpdatedChannel.id,
+      created_at: nowISO, // 必須プロパティ
       subscriber_count: statistics.subscriberCount ? parseInt(statistics.subscriberCount, 10) : null,
       video_count: statistics.videoCount ? parseInt(statistics.videoCount, 10) : null,
       total_view_count: statistics.viewCount ? parseInt(statistics.viewCount, 10) : null,
@@ -225,9 +231,8 @@ export async function POST(request: NextRequest) {
 
     console.log(`[API getChannelInfo] Channel info for ${savedOrUpdatedChannel.youtube_channel_id} saved/updated. Identified by: ${identifiedByMethod}. Stats log attempted.`);
 
-    // 7. フロントエンドに返すデータ
     const extractedInfoForClient: ExtractedChannelInfoForClient = {
-      channelId: channelDataFromApi.id,
+      channelId: channelDataFromApi.id, // 必須プロパティ
       title: snippet.title,
       description: snippet.description,
       publishedAt: snippet.publishedAt,
@@ -245,20 +250,52 @@ export async function POST(request: NextRequest) {
 
   } catch (error: unknown) {
     console.error('[API getChannelInfo] General error in POST handler:', error);
-    // ... (既存の堅牢なエラーハンドリングは維持) ...
     let errorMessage = 'Failed to fetch channel info.';
-    let errorDetails: unknown = 'Unknown error details';
-    if (error instanceof Error) {
-      errorMessage = error.message; 
-      errorDetails = error.stack || error.message;
-      if (typeof error === 'object' && error !== null && 'response' in error && error.response && typeof (error.response as any).data?.error?.message === 'string'){
-        errorMessage = `Google API Error: ${(error.response as any).data.error.message}`;
-        errorDetails = (error.response as any).data;
+    let errorDetails: SupabaseErrorDetail | string | null = null;
+
+    // ★★★ この catch ブロックの型ガードを修正 ★★★
+    if (error instanceof Error) { // まず標準のErrorインスタンスかチェック
+      errorMessage = error.message;
+      errorDetails = error.stack || error.message; // 基本はスタックかメッセージ
+
+      // 次に、error オブジェクトがSupabase/Google API特有の構造を持つかチェック
+      // (より安全なプロパティアクセスのために、存在を個別に確認)
+      const errObj = error as any; // 一時的にanyとしてアクセスするが、慎重に
+
+      if (
+        errObj.response &&
+        typeof errObj.response === 'object' &&
+        errObj.response.data &&
+        typeof errObj.response.data === 'object' &&
+        errObj.response.data.error &&
+        typeof errObj.response.data.error === 'object' &&
+        typeof errObj.response.data.error.message === 'string'
+      ) {
+        // Google APIのエラー形式に合致する可能性が高い
+        errorMessage = `Google API Error: ${errObj.response.data.error.message}`;
+        errorDetails = errObj.response.data as SupabaseErrorDetail; // SupabaseErrorDetailと構造が似ていると仮定
+      } else if (
+          // SupabaseのPostgrestErrorは message, details, hint, code を持つ
+          typeof errObj.message === 'string' &&
+          ('code' in errObj || 'details' in errObj || 'hint' in errObj)
+      ){
+          // Supabase から直接 throw されたエラーの可能性 (response構造なし)
+          errorDetails = {
+              message: errObj.message,
+              code: typeof errObj.code === 'string' ? errObj.code : null,
+              details: typeof errObj.details === 'string' ? errObj.details : null,
+              hint: typeof errObj.hint === 'string' ? errObj.hint : null,
+          };
       }
-    } else if (typeof error === 'string'){
-        errorMessage = error;
-        errorDetails = error;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+      errorDetails = error;
+    } else {
+      errorMessage = 'An unknown error occurred.';
+      errorDetails = 'The error object was not an instance of Error or a string.';
     }
+    // ★★★ ここまで修正 ★★★
+
     return NextResponse.json(
       { message: errorMessage, error: errorMessage, details: errorDetails },
       { status: 500 }
